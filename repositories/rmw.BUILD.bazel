@@ -11,7 +11,7 @@ ros2_c_library(
     name = "rmw",
     srcs = glob(["rmw/src/*.c"]),
     hdrs = glob(["rmw/include/**/*.h"]),
-    copts = ["-std=c11"],
+    copts = ["-std=c11", "-fPIC"],
     includes = ["rmw/include"],
     visibility = ["//visibility:public"],
     deps = [

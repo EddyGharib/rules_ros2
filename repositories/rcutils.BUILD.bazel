@@ -68,5 +68,6 @@ ros2_c_library(
         "@platforms//os:linux": ["_GNU_SOURCE"],
         "//conditions:default": [],
     }),
+    copts = ["-fPIC"],
     visibility = ["//visibility:public"],
 )

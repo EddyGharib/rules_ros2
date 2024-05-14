@@ -8,6 +8,7 @@ ros2_cpp_library(
     srcs = glob(["src/*.cpp"]),
     hdrs = glob(["include/**/*.hpp"]),
     includes = ["include"],
+    copts = ["-fPIC"],
     visibility = ["//visibility:public"],
     deps = ["@ros2_rcutils//:rcutils"],
 )

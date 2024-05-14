@@ -74,6 +74,7 @@ ros2_cpp_library(
         "include",
         "rclcpp/include",
     ],
+    linkopts = ["-lm"],
     visibility = ["//visibility:public"],
     deps = [
         "@ros2_ament_index//:ament_index_cpp",

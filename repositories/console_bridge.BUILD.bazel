@@ -8,6 +8,7 @@ cc_library(
     srcs = glob(["src/*.cpp"]),
     hdrs = glob(["include/console_bridge/*.h"]) + [":console_bridge_export_h"],
     includes = ["include"],
+    copts = ["-fPIC"],
     linkopts = ["-fvisibility=hidden"],
     visibility = ["//visibility:public"],
 )

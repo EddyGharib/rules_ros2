@@ -29,6 +29,7 @@ ros2_c_library(
         ":rosidl_typesupport_interface",
         "@ros2_rcutils//:rcutils",
     ],
+    copts = ["-fPIC"],
 )
 
 py_library(
