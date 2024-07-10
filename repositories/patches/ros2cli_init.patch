@@ -1,7 +1,7 @@
-diff --git a/ros2cli/ros2cli/__init__.py b/ros2cli/ros2cli/__init__.py
+diff --git ros2cli/ros2cli/__init__.py ros2cli/ros2cli/__init__.py
 index e69de29..bb61062 100644
---- a/ros2cli/ros2cli/__init__.py
-+++ b/ros2cli/ros2cli/__init__.py
+--- ros2cli/ros2cli/__init__.py
++++ ros2cli/ros2cli/__init__.py
 @@ -0,0 +1,2 @@
 +import pkgutil
 +__path__ = pkgutil.extend_path(__path__, __name__)
