@@ -869,15 +869,16 @@ def _py_generator_impl(ctx):
                 linked_dynamic_libraries.append(library.dynamic_library)
 
     return [
-        DefaultInfo(runfiles = ctx.runfiles(
-            transitive_files = depset(
-                transitive = [
-                    py_info.transitive_sources,
-                    py_info.dynamic_libraries,
-                    depset(linked_dynamic_libraries),
-                ],
-            ),
-        )),
+        # TODO Check why this fails bazel analysis phase
+        # DefaultInfo(runfiles = ctx.runfiles(
+        #     transitive_files = depset(
+        #         transitive = [
+        #             py_info.transitive_sources,
+        #             py_info.dynamic_libraries,
+        #             depset(linked_dynamic_libraries),
+        #         ],
+        #     ),
+        # )),
         PyInfo(
             transitive_sources = py_info.transitive_sources,
             imports = py_info.imports,
