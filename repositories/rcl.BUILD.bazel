@@ -17,6 +17,7 @@ ros2_c_library(
         "@ros2_rcutils//:rcutils",
         "@ros2_rmw//:rmw",
     ],
+    copts = ["-fPIC"],
 )
 
 ros2_c_library(
@@ -37,6 +38,7 @@ ros2_c_library(
         "@ros2_rosidl//:rosidl_runtime_c",
         "@ros2_tracing//:tracetools",
     ],
+    copts = ["-fPIC"],
 )
 
 ros2_c_library(
@@ -55,6 +57,11 @@ ros2_c_library(
         "@ros2_rmw//:rmw",
         "@ros2_rosidl//:rosidl_runtime_c",
     ],
+    # copts = select({
+    #     "@bazel_tools//tools/cpp:gcc": ["-fPIC"],
+    #     "//conditions:default": [],
+    # }),
+    copts = ["-fPIC"],
 )
 
 ros2_c_library(
@@ -70,4 +77,5 @@ ros2_c_library(
         ":rcl",
         "@ros2_rcl_interfaces//:c_lifecycle_msgs",
     ],
+    copts = ["-fPIC"],
 )
