@@ -187,8 +187,8 @@ def ros2_repositories_impl():
         patch_args = ["-p1"],
         patches = [
             "@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_fix-maybe-uninitialized-warning.patch",
-            "@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_ts_libs_ownership.patch"
-            "@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_include_functional_node_parameters.patch"
+            "@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_ts_libs_ownership.patch",
+            "@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_include_functional_node_parameters.patch",
         ],
         sha256 = "cee55b4168361030a3718d8b5d3d36d9f1d9c91460d534f74d28f46a101e6f61",
         strip_prefix = "rclcpp-16.0.9",
