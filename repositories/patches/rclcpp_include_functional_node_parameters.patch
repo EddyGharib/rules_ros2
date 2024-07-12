@@ -1,7 +1,7 @@
-diff --git rclcpp/include/rclcpp/node_interfaces/node_parameters_interface.hpp rclcpp/include/rclcpp/node_interfaces/node_parameters_interface.hpp
+diff --git a/rclcpp/include/rclcpp/node_interfaces/node_parameters_interface.hpp b/rclcpp/include/rclcpp/node_interfaces/node_parameters_interface.hpp
 index 743c1b8d..6a784784 100644
---- rclcpp/include/rclcpp/node_interfaces/node_parameters_interface.hpp
-+++ rclcpp/include/rclcpp/node_interfaces/node_parameters_interface.hpp
+--- a/rclcpp/include/rclcpp/node_interfaces/node_parameters_interface.hpp
++++ b/rclcpp/include/rclcpp/node_interfaces/node_parameters_interface.hpp
 @@ -19,6 +19,7 @@
  #include <memory>
  #include <string>
