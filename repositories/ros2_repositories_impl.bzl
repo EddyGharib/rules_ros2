@@ -119,6 +119,9 @@ def ros2_repositories_impl():
         build_file = "@com_github_mvukov_rules_ros2//repositories:libstatistics_collector.BUILD.bazel",
         sha256 = "12e9e52e2b342e471a31ad41db18e72795ac2b0faf56a54adcb74a24de630fa3",
         strip_prefix = "libstatistics_collector-1.3.1",
+        patches = [
+            "@com_github_mvukov_rules_ros2//repositories/patches:libstatistics_collector-include-cstdint.patch",
+        ],
         url = "https://github.com/ros-tooling/libstatistics_collector/archive/refs/tags/1.3.1.tar.gz",
     )
 
@@ -182,7 +185,11 @@ def ros2_repositories_impl():
         build_file = "@com_github_mvukov_rules_ros2//repositories:rclcpp.BUILD.bazel",
         patch_cmds = ["patch"],
         patch_args = ["-p1"],
-        patches = ["@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_fix-maybe-uninitialized-warning.patch", "@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_ts_libs_ownership.patch"],
+        patches = [
+            "@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_fix-maybe-uninitialized-warning.patch",
+            "@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_ts_libs_ownership.patch"
+            "@com_github_mvukov_rules_ros2//repositories/patches:rclcpp_include_functional_node_parameters.patch"
+        ],
         sha256 = "cee55b4168361030a3718d8b5d3d36d9f1d9c91460d534f74d28f46a101e6f61",
         strip_prefix = "rclcpp-16.0.9",
         url = "https://github.com/ros2/rclcpp/archive/refs/tags/16.0.9.tar.gz",
