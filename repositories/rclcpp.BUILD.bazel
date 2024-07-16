@@ -9,7 +9,7 @@ load(
     "@com_github_mvukov_rules_ros2//repositories:rclcpp_interfaces.bzl",
     "rclcpp_interfaces",
 )
-load("@com_github_mvukov_rules_ros2//ros2:cc_defs.bzl", "ros2_cpp_library")
+load("@com_github_mvukov_rules_ros2//ros2:cc_defs.bzl", "ros2_cpp_binary", "ros2_cpp_library")
 load("@rules_python//python:defs.bzl", "py_binary")
 load("@rules_ros2_pip_deps//:requirements.bzl", "requirement")
 
@@ -149,3 +149,31 @@ ros2_cpp_library(
         "@ros2_rcpputils//:rcpputils",
     ],
 )
+
+ros2_cpp_binary(
+    name = "component_container_mt",
+    srcs = ["rclcpp_components/src/component_container_mt.cpp"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":rclcpp_components",
+    ],
+)
+
+ros2_cpp_binary(
+    name = "component_manager",
+    srcs = ["rclcpp_components/src/component_manager.cpp"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":rclcpp_components",
+    ],
+)
+
+ros2_cpp_binary(
+    name = "component_container",
+    srcs = ["rclcpp_components/src/component_container.cpp"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":rclcpp_components",
+    ],
+)
+
