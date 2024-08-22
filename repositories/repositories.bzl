@@ -16,9 +16,9 @@ def ros2_workspace_repositories():
     maybe(
         http_archive,
         name = "rules_python",
-        sha256 = "778aaeab3e6cfd56d681c89f5c10d7ad6bf8d2f1a72de9de55b23081b2d31618",
-        strip_prefix = "rules_python-0.34.0",
-        url = "https://github.com/bazelbuild/rules_python/archive/refs/tags/0.34.0.tar.gz",
+        sha256 = "be04b635c7be4604be1ef20542e9870af3c49778ce841ee2d92fcb42f9d9516a",
+        strip_prefix = "rules_python-0.35.0",
+        url = "https://github.com/bazelbuild/rules_python/archive/refs/tags/0.35.0.tar.gz",
     )
 
     maybe(
@@ -59,9 +59,9 @@ def ros2_workspace_repositories():
         http_archive,
         name = "pybind11",
         build_file = "@com_github_mvukov_rules_ros2//repositories:pybind11.BUILD.bazel",
-        sha256 = "51631e88960a8856f9c497027f55c9f2f9115cafb08c0005439838a05ba17bfc",
-        strip_prefix = "pybind11-2.13.1",
-        urls = ["https://github.com/pybind/pybind11/archive/refs/tags/v2.13.1.tar.gz"],
+        sha256 = "efc901aa0aab439a3fea6efeaf930b5a349fb06394bf845c64ce15a9cf8f0240",
+        strip_prefix = "pybind11-2.13.4",
+        urls = ["https://github.com/pybind/pybind11/archive/refs/tags/v2.13.4.tar.gz"],
     )
 
     maybe(
@@ -75,9 +75,9 @@ def ros2_workspace_repositories():
     maybe(
         http_archive,
         name = "googletest",
-        sha256 = "8ad598c73ad796e0d8280b082cebd82a630d73e73cd3c70057938a6501bba5d7",
-        strip_prefix = "googletest-1.14.0",
-        url = "https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz",
+        sha256 = "7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926",
+        strip_prefix = "googletest-1.15.2",
+        url = "https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz",
     )
 
     _googletest_deps()
@@ -140,9 +140,9 @@ def ros2_workspace_repositories():
     maybe(
         http_archive,
         name = "boringssl",
-        sha256 = "dbb01899ee400d9ee06900c0a8f614b24c3f733e9541a11dd7159c7f93f4bd78",
-        strip_prefix = "boringssl-55d3c166e05ee3ea5b72d3220797df083be6128e",
-        urls = ["https://github.com/hedronvision/boringssl/archive/55d3c166e05ee3ea5b72d3220797df083be6128e.tar.gz"],
+        sha256 = "b282f3dcf29bd3d83b79a59caf1a17cfa53a5b339e3391718ae35cfcd0ade2a4",
+        strip_prefix = "boringssl-e056e3e52e1dd0e5909fe43d4a684a0c9e96f1f9",
+        urls = ["https://github.com/hedronvision/boringssl/archive/e056e3e52e1dd0e5909fe43d4a684a0c9e96f1f9.tar.gz"],
     )
 
     maybe(
