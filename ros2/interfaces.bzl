@@ -863,7 +863,7 @@ def _py_generator_impl(ctx):
     linked_dynamic_libraries = []
     for linker_input in py_info.linker_inputs.to_list():
         for library in linker_input.libraries:
-            if library.pic_static_library == None:
+            if library.pic_static_library == None and library.dynamic_library != None:
                 # The sole purpose of this shenanigan is to fetch @ros2_rosidl//:rosidl_typesupport_introspection_c_identifier.
                 # For that target we know it only has a dynamic library.
                 linked_dynamic_libraries.append(library.dynamic_library)
