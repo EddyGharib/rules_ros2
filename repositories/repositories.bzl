@@ -59,9 +59,9 @@ def ros2_workspace_repositories():
         http_archive,
         name = "pybind11",
         build_file = "@com_github_mvukov_rules_ros2//repositories:pybind11.BUILD.bazel",
-        sha256 = "efc901aa0aab439a3fea6efeaf930b5a349fb06394bf845c64ce15a9cf8f0240",
-        strip_prefix = "pybind11-2.13.4",
-        urls = ["https://github.com/pybind/pybind11/archive/refs/tags/v2.13.4.tar.gz"],
+        sha256 = "e08cb87f4773da97fa7b5f035de8763abc656d87d5773e62f6da0587d1f0ec20",
+        strip_prefix = "pybind11-2.13.6",
+        urls = ["https://github.com/pybind/pybind11/archive/refs/tags/v2.13.6.tar.gz"],
     )
 
     maybe(
@@ -129,9 +129,9 @@ def ros2_workspace_repositories():
         http_archive,
         name = "asio",
         build_file = "@com_github_mvukov_rules_ros2//repositories:asio.BUILD.bazel",
-        sha256 = "b31c63867daaba0e460ee2c85dc508a52c81db0a7318e0d2147f444b26f80ed7",
-        strip_prefix = "asio-asio-1-27-0/asio",
-        urls = ["https://github.com/chriskohlhoff/asio/archive/refs/tags/asio-1-27-0.tar.gz"],
+        sha256 = "530540f973498c2d297771af1bc852f69b27509bbb56bc7ac3309c928373286f",
+        strip_prefix = "asio-asio-1-31-0",
+        url = "https://github.com/chriskohlhoff/asio/archive/refs/tags/asio-1-31-0.tar.gz",
     )
 
     # We're pointing at hedronvision's mirror of google/boringssl:main-with-bazel to get
@@ -140,9 +140,9 @@ def ros2_workspace_repositories():
     maybe(
         http_archive,
         name = "boringssl",
-        sha256 = "b282f3dcf29bd3d83b79a59caf1a17cfa53a5b339e3391718ae35cfcd0ade2a4",
-        strip_prefix = "boringssl-e056e3e52e1dd0e5909fe43d4a684a0c9e96f1f9",
-        urls = ["https://github.com/hedronvision/boringssl/archive/e056e3e52e1dd0e5909fe43d4a684a0c9e96f1f9.tar.gz"],
+        sha256 = "a9a69266d2a94ee14e3fbfa5640d07e3d8445f031453f5161f3f7dcc443e9975",
+        strip_prefix = "boringssl-4fc9fcefdcb638566daf36c1328ae01d69d4c246",
+        urls = ["https://github.com/hedronvision/boringssl/archive/4fc9fcefdcb638566daf36c1328ae01d69d4c246.tar.gz"],
     )
 
     maybe(
