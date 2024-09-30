@@ -14,6 +14,7 @@ py_library(
         requirement("packaging"),
         requirement("psutil"),
         requirement("types-pkg-resources"),
+        requirement("netifaces"),
     ],
 )
 
