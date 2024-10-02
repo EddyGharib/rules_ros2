@@ -67,7 +67,7 @@ index 16329a42..82940c7d 100644
  
    try {
 -    auto resources = get_component_resources(request->package_name);
-+    if (!std::filesystem::exists(request->package_name)) {
++    if (!rclcpp::fs::exists(request->package_name)) {
 +      throw ComponentManagerException("Could not find requested resource in ament index");
 +    }
 +    std::vector<ComponentResource> resources = {{request->plugin_name, request->package_name}};
