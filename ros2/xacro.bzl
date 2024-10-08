@@ -41,7 +41,7 @@ xacro = rule(
         ),
         "args": attr.string_list(),
         "_xacro": attr.label(
-            default = Label("@ros2_xacro//:app"),
+            default = Label("//:app"),
             executable = True,
             cfg = "exec",
         ),

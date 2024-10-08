@@ -1,0 +1,6 @@
+# Flip these 2 lines to test public repo access locally
+# common --registry=https://raw.githubusercontent.com/idealworks/bazel-public-registry/master
+common --registry=file://%workspace%/../../bazel-public-registry
+common --registry=https://bcr.bazel.build
+
+build --incompatible_default_to_explicit_init_py

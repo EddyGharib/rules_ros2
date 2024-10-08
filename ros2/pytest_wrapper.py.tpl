@@ -11,6 +11,7 @@ import pytest
 
 {ament_setup}
 
+print(f"argv: {sys.argv}")
 
 def start_coverage_session() -> coverage.Coverage:
     coverage_dir = pathlib.Path(os.getenv('COVERAGE_DIR'))
@@ -48,6 +49,7 @@ def main() -> None:
         print(f'Running with ROS_DOMAIN_ID {os.environ["ROS_DOMAIN_ID"]}')
 
         bazel_coverage = os.getenv('COVERAGE') == '1'
+        print(f'bazel_coverage {bazel_coverage}')
 
         coverage_session = None
         if bazel_coverage:
@@ -57,6 +59,7 @@ def main() -> None:
             '-ra', '-vv', '-p', 'launch_pytest.plugin',
             f'--junitxml={os.environ["XML_OUTPUT_FILE"]}'
         ] + sys.argv[1:]
+        print(f"args: {args}")
         pytest_exit_code = pytest.main(args)
 
         if coverage_session:
