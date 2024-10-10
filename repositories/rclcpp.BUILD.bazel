@@ -157,15 +157,7 @@ ros2_cpp_binary(
     deps = [
         ":rclcpp_components",
     ],
-)
-
-ros2_cpp_binary(
-    name = "component_manager",
-    srcs = ["rclcpp_components/src/component_manager.cpp"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":rclcpp_components",
-    ],
+    linkopts = ["-rdynamic"],
 )
 
 ros2_cpp_binary(
@@ -175,5 +167,5 @@ ros2_cpp_binary(
     deps = [
         ":rclcpp_components",
     ],
+    linkopts = ["-rdynamic"],
 )
-
