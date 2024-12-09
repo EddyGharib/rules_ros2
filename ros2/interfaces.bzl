@@ -25,36 +25,10 @@ Ros2InterfaceInfo = provider(
     fields = [
         "info",
         "deps",
+        "deps_labels",
+        "name",
+        "type_description_outputs",
     ],
-)
-
-def _ros2_interface_library_impl(ctx):
-    return [
-        DefaultInfo(files = depset(ctx.files.srcs)),
-        Ros2InterfaceInfo(
-            info = struct(
-                srcs = ctx.files.srcs,
-            ),
-            deps = depset(
-                direct = [dep[Ros2InterfaceInfo].info for dep in ctx.attr.deps],
-                transitive = [
-                    dep[Ros2InterfaceInfo].deps
-                    for dep in ctx.attr.deps
-                ],
-            ),
-        ),
-    ]
-
-ros2_interface_library = rule(
-    attrs = {
-        "srcs": attr.label_list(
-            allow_files = [".action", ".msg", ".srv"],
-            mandatory = True,
-        ),
-        "deps": attr.label_list(providers = [Ros2InterfaceInfo]),
-    },
-    implementation = _ros2_interface_library_impl,
-    provides = [Ros2InterfaceInfo],
 )
 
 def _to_snake_case(not_snake_case):
@@ -137,16 +111,58 @@ def _run_adapter(ctx, package_name, srcs):
 IdlAdapterAspectInfo = provider("TBD", fields = [
     "idl_files",
     "idl_tuples",
+    "type_description_outputs",
+    "type_description_tuples",
 ])
+
+def _artifact_base_path(repo_name):
+    return "external/{}/".format(repo_name) if repo_name else ""
 
 def _idl_adapter_aspect_impl(target, ctx):
     package_name = target.label.name
     srcs = target[Ros2InterfaceInfo].info.srcs
     idl_files, idl_tuples = _run_adapter(ctx, package_name, srcs)
+
+    deps_labels = target[Ros2InterfaceInfo].deps_labels
+
+    deps_include_paths = []
+    extra_inputs = []
+    for dep in deps_labels:
+        dep_name = dep[Ros2InterfaceInfo].name
+        dep_bindir = "{}/{}{}".format(ctx.bin_dir.path, _artifact_base_path(ctx.label.repo_name), dep_name)
+        deps_include_paths.append("{}:{}".format(dep_name, dep_bindir))
+        extra_inputs.extend(dep[IdlAdapterAspectInfo].type_description_outputs)
+
+    for dep in target[Ros2InterfaceInfo].deps.to_list():
+        extra_inputs.extend(dep.srcs)
+
+    type_description_outputs, type_description_include_dir = run_generator(
+        ctx,
+        srcs,
+        package_name,
+        idl_tuples,
+        idl_files,
+        ctx.executable._type_description_generator,
+        ctx.attr._type_description_templates,
+        _INTERFACE_GENERATOR_TYPE_DESCRIPTION_OUTPUT_MAPPING,
+        visibility_control_template = None,
+        mnemonic = "Ros2IdlTypeDescriptionC",
+        progress_message = "Generating Type Description for %{label}",
+        out_snake_case_stemed = False,
+        include_paths = deps_include_paths,
+        extra_inputs = extra_inputs,
+    )
+
+    type_description_tuples = []
+    for file in type_description_outputs:
+        type_description_tuples.append("msg/{}.idl:{}".format(_get_stem(file), file.path))
+
     return [
         IdlAdapterAspectInfo(
             idl_files = idl_files,
             idl_tuples = idl_tuples,
+            type_description_outputs = type_description_outputs,
+            type_description_tuples = type_description_tuples,
         ),
     ]
 
@@ -154,6 +170,14 @@ idl_adapter_aspect = aspect(
     implementation = _idl_adapter_aspect_impl,
     attr_aspects = ["deps"],
     attrs = {
+        "_type_description_generator": attr.label(
+            default = Label("@ros2_rosidl//:rosidl_generator_type_description_app"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_type_description_templates": attr.label(
+            default = Label("@ros2_rosidl//:rosidl_generator_type_description_templates"),
+        ),
         "_adapter": attr.label(
             default = Label("@ros2_rosidl//:rosidl_adapter_app"),
             executable = True,
@@ -163,6 +187,44 @@ idl_adapter_aspect = aspect(
     provides = [IdlAdapterAspectInfo],
 )
 
+def _ros2_interface_library_impl(ctx):
+    direct_deps = [dep[Ros2InterfaceInfo].info for dep in ctx.attr.deps]
+    transitive_deps = [dep[Ros2InterfaceInfo].deps for dep in ctx.attr.deps]
+    type_desc_deps = []
+    for dep in ctx.attr.deps:
+        for out in dep[Ros2InterfaceInfo].type_description_outputs:
+            type_desc_deps.append(out)
+    return [
+        DefaultInfo(files = depset(ctx.files.srcs)),
+        Ros2InterfaceInfo(
+            info = struct(
+                srcs = ctx.files.srcs,
+            ),
+            deps = depset(
+                direct = direct_deps,
+                transitive = transitive_deps,
+            ),
+            deps_labels = ctx.attr.deps,
+            name = ctx.attr.name,
+            type_description_outputs = type_desc_deps,
+        ),
+    ]
+
+ros2_interface_library = rule(
+    attrs = {
+        "srcs": attr.label_list(
+            allow_files = [".action", ".msg", ".srv"],
+            mandatory = True,
+        ),
+        "deps": attr.label_list(
+            providers = [Ros2InterfaceInfo],
+            aspects = [idl_adapter_aspect],
+        ),
+    },
+    implementation = _ros2_interface_library_impl,
+    provides = [Ros2InterfaceInfo],
+)
+
 def _get_parent_dir(path):
     return "/".join(path.split("/")[:-1])
 
@@ -170,7 +232,8 @@ def run_generator(
         ctx,
         srcs,
         package_name,
-        adapter,
+        idl_tuples,
+        idl_files,
         generator,
         generator_templates,
         output_mapping,
@@ -178,7 +241,11 @@ def run_generator(
         extra_generator_args = None,
         extra_generated_outputs = None,
         mnemonic = None,
-        progress_message = None):
+        progress_message = None,
+        extra_inputs = [],
+        type_description_tuples = [],
+        include_paths = [],
+        out_snake_case_stemed = True):
     generator_templates = generator_templates[DefaultInfo].files.to_list()
 
     generator_arguments_file = ctx.actions.declare_file(
@@ -187,10 +254,12 @@ def run_generator(
     output_dir = generator_arguments_file.dirname
     generator_arguments = struct(
         package_name = package_name,
-        idl_tuples = adapter.idl_tuples,
+        idl_tuples = idl_tuples,
+        type_description_tuples = type_description_tuples,
         output_dir = output_dir,
         template_dir = generator_templates[0].dirname,
-        target_dependencies = [],  # TODO(mvukov) Do we need this?
+        target_dependencies = [],
+        include_paths = include_paths,
     )
     ctx.actions.write(generator_arguments_file, generator_arguments.to_json())
 
@@ -208,6 +277,8 @@ def run_generator(
         extension = src.extension
         stem = _get_stem(src)
         snake_case_stem = _to_snake_case(stem)
+        if not out_snake_case_stemed:
+            snake_case_stem = stem
         for t in output_mapping:
             relative_file = "{}/{}/{}".format(
                 package_name,
@@ -222,7 +293,7 @@ def run_generator(
         generator_outputs.append(ctx.actions.declare_file(relative_file))
 
     ctx.actions.run(
-        inputs = adapter.idl_files + generator_templates + [generator_arguments_file],
+        inputs = idl_files + generator_templates + [generator_arguments_file] + extra_inputs,
         outputs = generator_outputs,
         executable = generator,
         arguments = [generator_cmd_args],
@@ -252,17 +323,23 @@ def run_generator(
 
 CGeneratorAspectInfo = provider("TBD", fields = [
     "cc_info",
+    "type_desc",
 ])
+
+_INTERFACE_GENERATOR_TYPE_DESCRIPTION_OUTPUT_MAPPING = [
+    "%s.json",
+]
 
 _INTERFACE_GENERATOR_C_OUTPUT_MAPPING = [
     "%s.h",
+    "detail/%s__description.c",
     "detail/%s__functions.c",
     "detail/%s__functions.h",
     "detail/%s__struct.h",
     "detail/%s__type_support.h",
 ]
 
-_TYPESUPPORT_GENERATOR_C_OUTPUT_MAPPING = ["%s__type_support.c"]
+_TYPESUPPORT_GENERATOR_C_OUTPUT_MAPPING = ["%s__type_support.cpp"]
 
 _TYPESUPPORT_INTROSPECION_GENERATOR_C_OUTPUT_MAPPING = [
     "detail/%s__rosidl_typesupport_introspection_c.h",
@@ -371,20 +448,24 @@ def _c_generator_aspect_impl(target, ctx):
         ctx,
         srcs,
         package_name,
-        adapter,
+        adapter.idl_tuples,
+        adapter.idl_files,
         ctx.executable._interface_generator,
         ctx.attr._interface_templates,
         _INTERFACE_GENERATOR_C_OUTPUT_MAPPING,
         visibility_control_template = ctx.file._interface_visibility_control_template,
         mnemonic = "Ros2IdlGeneratorC",
         progress_message = "Generating C IDL interfaces for %{label}",
+        extra_inputs = adapter.type_description_outputs,
+        type_description_tuples = adapter.type_description_tuples,
     )
 
     typesupport_outputs, _ = run_generator(
         ctx,
         srcs,
         package_name,
-        adapter,
+        adapter.idl_tuples,
+        adapter.idl_files,
         ctx.executable._typesupport_generator,
         ctx.attr._typesupport_templates,
         _TYPESUPPORT_GENERATOR_C_OUTPUT_MAPPING,
@@ -402,7 +483,8 @@ def _c_generator_aspect_impl(target, ctx):
         ctx,
         srcs,
         package_name,
-        adapter,
+        adapter.idl_tuples,
+        adapter.idl_files,
         ctx.executable._typesupport_introspection_generator,
         ctx.attr._typesupport_introspection_templates,
         _TYPESUPPORT_INTROSPECION_GENERATOR_C_OUTPUT_MAPPING,
@@ -518,6 +600,7 @@ _INTERFACE_GENERATOR_CPP_OUTPUT_MAPPING = [
     "detail/%s__builder.hpp",
     "detail/%s__struct.hpp",
     "detail/%s__traits.hpp",
+    "detail/%s__support.hpp",
 ]
 
 _TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING = [
@@ -538,7 +621,8 @@ def _cpp_generator_aspect_impl(target, ctx):
         ctx,
         srcs,
         package_name,
-        adapter,
+        adapter.idl_tuples,
+        adapter.idl_files,
         ctx.executable._interface_generator,
         ctx.attr._interface_templates,
         _INTERFACE_GENERATOR_CPP_OUTPUT_MAPPING,
@@ -550,7 +634,8 @@ def _cpp_generator_aspect_impl(target, ctx):
         ctx,
         srcs,
         package_name,
-        adapter,
+        adapter.idl_tuples,
+        adapter.idl_files,
         ctx.executable._typesupport_generator,
         ctx.attr._typesupport_templates,
         _TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING,
@@ -567,7 +652,8 @@ def _cpp_generator_aspect_impl(target, ctx):
         ctx,
         srcs,
         package_name,
-        adapter,
+        adapter.idl_tuples,
+        adapter.idl_files,
         ctx.executable._typesupport_introspection_generator,
         ctx.attr._typesupport_introspection_templates,
         _TYPESUPPORT_INTROSPECION_GENERATOR_CPP_OUTPUT_MAPPING,
@@ -696,7 +782,8 @@ def _py_generator_aspect_impl(target, ctx):
         ctx,
         srcs,
         package_name,
-        adapter,
+        adapter.idl_tuples,
+        adapter.idl_files,
         ctx.executable._py_interface_generator,
         ctx.attr._py_interface_templates,
         _INTERFACE_GENERATOR_PY_OUTPUT_MAPPING,
@@ -868,8 +955,12 @@ def _py_generator_impl(ctx):
                 # For that target we know it only has a dynamic library.
                 linked_dynamic_libraries.append(library.dynamic_library)
 
+    type_desc_deps = []
+    for dep in ctx.attr.deps:
+        for out in dep[Ros2InterfaceInfo].type_description_outputs:
+            type_desc_deps.append(out)
+
     return [
-        # TODO Check why this fails bazel analysis phase
         DefaultInfo(runfiles = ctx.runfiles(
             transitive_files = depset(
                 transitive = [
@@ -878,6 +969,7 @@ def _py_generator_impl(ctx):
                     depset(linked_dynamic_libraries),
                 ],
             ),
+            files = type_desc_deps,
         )),
         PyInfo(
             transitive_sources = py_info.transitive_sources,
