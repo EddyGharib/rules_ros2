@@ -600,7 +600,7 @@ _INTERFACE_GENERATOR_CPP_OUTPUT_MAPPING = [
     "detail/%s__builder.hpp",
     "detail/%s__struct.hpp",
     "detail/%s__traits.hpp",
-    "detail/%s__support.hpp",
+    "detail/%s__type_support.hpp",
 ]
 
 _TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING = [
@@ -639,6 +639,7 @@ def _cpp_generator_aspect_impl(target, ctx):
         ctx.executable._typesupport_generator,
         ctx.attr._typesupport_templates,
         _TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING,
+        visibility_control_template = ctx.file._interface_visibility_control_template,
         extra_generator_args = [
             # TODO(mvukov) There are also rosidl_typesupport_connext_cpp and
             # rosidl_typesupport_fastrtps_cpp.
@@ -694,6 +695,10 @@ cpp_generator_aspect = aspect(
         ),
         "_interface_templates": attr.label(
             default = Label("@ros2_rosidl//:rosidl_generator_cpp_templates"),
+        ),
+        "_interface_visibility_control_template": attr.label(
+            default = Label("@ros2_rosidl//:rosidl_generator_cpp/resource/rosidl_generator_cpp__visibility_control.hpp.in"),
+            allow_single_file = True,
         ),
         "_typesupport_generator": attr.label(
             default = Label("@ros2_rosidl_typesupport//:rosidl_typesupport_generator_cpp_app"),
@@ -1003,7 +1008,7 @@ def py_ros2_interface_library(name, deps, **kwargs):
         name = name,
         deps = [
             name_py,
-            "@ros2_rosidl//:rosidl_parser",
+            Label("@ros2_rosidl//:rosidl_parser"),
             requirement("numpy"),
         ],
         **kwargs
