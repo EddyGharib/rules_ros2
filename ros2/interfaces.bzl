@@ -1008,7 +1008,7 @@ def py_ros2_interface_library(name, deps, **kwargs):
         name = name,
         deps = [
             name_py,
-            "@ros2_rosidl//:rosidl_parser",
+            Label("@ros2_rosidl//:rosidl_parser"),
             requirement("numpy"),
         ],
         **kwargs
