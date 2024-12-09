@@ -600,7 +600,7 @@ _INTERFACE_GENERATOR_CPP_OUTPUT_MAPPING = [
     "detail/%s__builder.hpp",
     "detail/%s__struct.hpp",
     "detail/%s__traits.hpp",
-    "detail/%s__support.hpp",
+    "detail/%s__type_support.hpp",
 ]
 
 _TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING = [
