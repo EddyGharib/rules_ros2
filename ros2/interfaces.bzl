@@ -256,13 +256,17 @@ def run_generator(
         extra_inputs = [],
         type_description_tuples = [],
         include_paths = [],
-        out_snake_case_stemed = True):
+        out_snake_case_stemed = True,
+        output_dir_suffix = None):
     generator_templates = generator_templates[DefaultInfo].files.to_list()
 
     generator_arguments_file = ctx.actions.declare_file(
         "{}/{}_args.json".format(package_name, generator.basename),
     )
     output_dir = generator_arguments_file.dirname
+
+    if output_dir_suffix:
+        output_dir = "{}{}".format(output_dir, output_dir_suffix)
     generator_arguments = struct(
         package_name = package_name,
         idl_tuples = idl_tuples,
@@ -290,6 +294,8 @@ def run_generator(
         snake_case_stem = _to_snake_case(stem)
         if not out_snake_case_stemed:
             snake_case_stem = stem
+        if output_dir_suffix:
+            extension = output_dir_suffix + extension
         for t in output_mapping:
             relative_file = "{}/{}/{}".format(
                 package_name,
@@ -390,7 +396,7 @@ def _compile_cc_generated_code(
         srcs,
         hdrs,
         deps,
-        cc_include_dir,
+        cc_include_dirs,
         copts,
         target = None):
     cc_toolchain = find_cpp_toolchain(ctx)
@@ -417,7 +423,7 @@ def _compile_cc_generated_code(
         cc_toolchain = cc_toolchain,
         feature_configuration = feature_configuration,
         user_compile_flags = copts,
-        system_includes = [cc_include_dir],
+        system_includes = cc_include_dirs,
         srcs = srcs,
         public_hdrs = hdrs,
         compilation_contexts = compilation_contexts,
@@ -488,6 +494,7 @@ def _c_generator_aspect_impl(target, ctx):
         ],
         mnemonic = "Ros2IdlTypeSupportC",
         progress_message = "Generating C type support for %{label}",
+        output_dir_suffix = "/c/",
     )
 
     typesupport_introspection_outputs, _ = run_generator(
@@ -515,7 +522,7 @@ def _c_generator_aspect_impl(target, ctx):
         srcs = srcs,
         hdrs = hdrs,
         deps = ctx.attr._c_deps,
-        cc_include_dir = cc_include_dir,
+        cc_include_dirs = [cc_include_dir],
         copts = ctx.attr._c_copts,
     )
 
@@ -614,9 +621,7 @@ _INTERFACE_GENERATOR_CPP_OUTPUT_MAPPING = [
     "detail/%s__type_support.hpp",
 ]
 
-_TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING = [
-    "%s__type_support.cpp",
-]
+_TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING = ["%s__type_support.cpp"]
 
 _TYPESUPPORT_INTROSPECION_GENERATOR_CPP_OUTPUT_MAPPING = [
     "detail/%s__rosidl_typesupport_introspection_cpp.hpp",
@@ -627,6 +632,22 @@ def _cpp_generator_aspect_impl(target, ctx):
     package_name = target.label.name
     srcs = target[Ros2InterfaceInfo].info.srcs
     adapter = target[IdlAdapterAspectInfo]
+
+    c_interface_outputs, c_cc_include_dir = run_generator(
+        ctx,
+        srcs,
+        package_name,
+        adapter.idl_tuples,
+        adapter.idl_files,
+        ctx.executable._c_interface_generator,
+        ctx.attr._c_interface_templates,
+        _INTERFACE_GENERATOR_C_OUTPUT_MAPPING,
+        visibility_control_template = ctx.file._c_interface_visibility_control_template,
+        mnemonic = "Ros2IdlGeneratorC",
+        progress_message = "Generating C IDL interfaces for %{label}",
+        extra_inputs = adapter.type_description_outputs,
+        type_description_tuples = adapter.type_description_tuples,
+    )
 
     interface_outputs, cc_include_dir = run_generator(
         ctx,
@@ -658,6 +679,7 @@ def _cpp_generator_aspect_impl(target, ctx):
         ],
         mnemonic = "Ros2IdlTypeSupportCpp",
         progress_message = "Generating C++ type support for %{label}",
+        output_dir_suffix = "/cpp/",
     )
 
     typesupport_introspection_outputs, _ = run_generator(
@@ -673,7 +695,7 @@ def _cpp_generator_aspect_impl(target, ctx):
         progress_message = "Generating C++ type introspection support for %{label}",
     )
 
-    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs
+    all_outputs = c_interface_outputs + interface_outputs + typesupport_outputs + typesupport_introspection_outputs
     hdrs = _get_hdrs(all_outputs)
     srcs = _get_srcs(all_outputs)
 
@@ -684,7 +706,7 @@ def _cpp_generator_aspect_impl(target, ctx):
         srcs = srcs,
         hdrs = hdrs,
         deps = ctx.attr._cpp_deps,
-        cc_include_dir = cc_include_dir,
+        cc_include_dirs = [c_cc_include_dir, cc_include_dir],
         copts = ctx.attr._cpp_copts,
     )
 
@@ -699,6 +721,18 @@ cpp_generator_aspect = aspect(
     implementation = _cpp_generator_aspect_impl,
     attr_aspects = ["deps"],
     attrs = {
+        "_c_interface_generator": attr.label(
+            default = Label("@ros2_rosidl//:rosidl_generator_c_app"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_c_interface_templates": attr.label(
+            default = Label("@ros2_rosidl//:rosidl_generator_c_templates"),
+        ),
+        "_c_interface_visibility_control_template": attr.label(
+            default = Label("@ros2_rosidl//:rosidl_generator_c/resource/rosidl_generator_c__visibility_control.h.in"),
+            allow_single_file = True,
+        ),
         "_interface_generator": attr.label(
             default = Label("@ros2_rosidl//:rosidl_generator_cpp_app"),
             executable = True,
@@ -822,7 +856,7 @@ def _py_generator_aspect_impl(target, ctx):
         srcs = cc_srcs,
         hdrs = [],
         deps = ctx.attr._py_ext_c_deps,
-        cc_include_dir = cc_include_dir,
+        cc_include_dirs = [cc_include_dir],
         copts = ctx.attr._py_ext_c_copts,
         target = target,
     )
