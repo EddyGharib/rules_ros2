@@ -129,7 +129,7 @@ def _idl_adapter_aspect_impl(target, ctx):
     extra_inputs = []
     for dep in deps_labels:
         dep_name = dep[Ros2InterfaceInfo].name
-        dep_bindir = "{}/{}{}".format(ctx.bin_dir.path, _artifact_base_path(ctx.label.repo_name), dep_name)
+        dep_bindir = "{}/{}{}".format(ctx.bin_dir.path, _artifact_base_path(dep.label.repo_name), dep_name)
         deps_include_paths.append("{}:{}".format(dep_name, dep_bindir))
         extra_inputs.extend(dep[IdlAdapterAspectInfo].type_description_outputs)
 
