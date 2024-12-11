@@ -129,7 +129,7 @@ def _idl_adapter_aspect_impl(target, ctx):
     extra_inputs = []
     for dep in deps_labels:
         dep_name = dep[Ros2InterfaceInfo].name
-        dep_bindir = "{}/{}{}".format(ctx.bin_dir.path, _artifact_base_path(ctx.label.repo_name), dep_name)
+        dep_bindir = "{}/{}{}".format(ctx.bin_dir.path, _artifact_base_path(dep.label.repo_name), dep_name)
         deps_include_paths.append("{}:{}".format(dep_name, dep_bindir))
         extra_inputs.extend(dep[IdlAdapterAspectInfo].type_description_outputs)
 
@@ -155,7 +155,18 @@ def _idl_adapter_aspect_impl(target, ctx):
 
     type_description_tuples = []
     for file in type_description_outputs:
-        type_description_tuples.append("msg/{}.idl:{}".format(_get_stem(file), file.path))
+        # The outputs will be in the form of "bazel-out/<config>/<repo_name>?/<package_name>/<file_path>".
+        # We want to map the <file_path> segment to the full path of the file, replacing the .json extension
+        # with .idl.
+        prefix = ctx.bin_dir.path + "/" + _artifact_base_path(target.label.repo_name) + package_name + "/"
+        if not file.path.startswith(prefix):
+            fail("Expected type description output to start with '{}', got '{}'".format(prefix, file.path))
+
+        path = file.path[len(prefix):]
+        if not path.endswith(".json"):
+            fail("Expected type description output to end with '.json', got '{}'".format(path))
+        path = path[:-5] + ".idl"
+        type_description_tuples.append("{}:{}".format(path, file.path))
 
     return [
         IdlAdapterAspectInfo(
