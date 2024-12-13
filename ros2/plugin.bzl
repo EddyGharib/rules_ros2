@@ -16,16 +16,8 @@
 
 load("@com_github_mvukov_rules_ros2//ros2:cc_defs.bzl", "ros2_cpp_library")
 load(
-    "@com_github_mvukov_rules_ros2//ros2:interfaces.bzl",
-    "CppGeneratorAspectInfo",
-    "IdlAdapterAspectInfo",
-    "Ros2InterfaceInfo",
-    "cpp_generator_aspect",
-    "idl_adapter_aspect",
-)
-load(
     "@com_github_mvukov_rules_ros2//ros2:plugin_aspects.bzl",
-    "Ros2PluginInfo",
+    "RosPluginInfo",
     "create_dynamic_library",
 )
 load("@rules_cc//cc:toolchain_utils.bzl", "find_cpp_toolchain")
@@ -44,7 +36,7 @@ def _ros2_plugin_impl(ctx):
             files = depset([dynamic_library]),
             runfiles = ctx.attr.dep[DefaultInfo].default_runfiles,
         ),
-        Ros2PluginInfo(
+        RosPluginInfo(
             target_name = target_name,
             dynamic_library = dynamic_library,
             types_to_bases_and_names = ctx.attr.types_to_bases_and_names,
@@ -65,7 +57,7 @@ ros2_plugin_rule = rule(
         ),
     },
     implementation = _ros2_plugin_impl,
-    provides = [Ros2PluginInfo],
+    provides = [RosPluginInfo],
     toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
     fragments = ["cpp"],
 )
