@@ -1,4 +1,5 @@
 # Copyright 2021 Milan Vukov
+# Copyright 2024 idealworks GmbH
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,25 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" ROS 2 IDL handling.
-"""
+"Rules and aspects for working with ROS2 interfaces."
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@com_github_mvukov_rules_ros2//ros2:cc_opts.bzl", "CPP_COPTS", "C_COPTS")
 load("@rules_cc//cc:toolchain_utils.bzl", "find_cpp_toolchain")
 load("@rules_python//python:defs.bzl", "py_library")
 load("@rules_ros2_pip_deps//:requirements.bzl", "requirement")
+load(":cc_opts.bzl", "CPP_COPTS", "C_COPTS")
 
-Ros2InterfaceInfo = provider(
-    "Provides info for interface code generation.",
-    fields = [
-        "info",
-        "deps",
-        "deps_labels",
-        "name",
-        "type_description_outputs",
-    ],
-)
+### Utility functions ###
 
 def _to_snake_case(not_snake_case):
     """ Converts camel-case to snake-case.
@@ -47,315 +38,15 @@ def _to_snake_case(not_snake_case):
     for i in range(len(not_snake_case)):
         prev_char, char, next_char = not_snake_case_padded[i:i + 3].elems()
         if char.isupper() and next_char.islower() and prev_char != " ":
-            # Insert an underscore before any upper case letter which is not
-            # followed by another upper case letter.
+            # Insert an underscore before any upper case letter which is not followed by another upper case letter.
             result += "_"
         elif char.isupper() and (prev_char.islower() or prev_char.isdigit()):
-            # Insert an underscore before any upper case letter which is
-            # preseded by a lower case letter or number.
+            # Insert an underscore before any upper case letter which is preceded by a lower case letter or number.
             result += "_"
         result += char.lower()
 
     return result
 
-def _get_stem(path):
-    return path.basename[:-len(path.extension) - 1]
-
-def _run_adapter(ctx, package_name, srcs):
-    adapter_arguments = struct(
-        package_name = package_name,
-        non_idl_tuples = [":{}".format(src.path) for src in srcs],
-    )
-
-    adapter_arguments_file = ctx.actions.declare_file(
-        "{}/rosidl_adapter_args.json".format(package_name),
-    )
-    ctx.actions.write(adapter_arguments_file, adapter_arguments.to_json())
-    adapter_map = ctx.actions.declare_file(
-        "{}/rosidl_adapter_map.idls".format(package_name),
-    )
-    output_dir = adapter_map.dirname
-
-    idl_files = []
-    idl_tuples = []
-    for src in srcs:
-        extension = src.extension
-        stem = _get_stem(src)
-        idl_files.append(ctx.actions.declare_file(
-            "{}/{}/{}.idl".format(package_name, extension, stem),
-        ))
-        idl_tuples.append(
-            "{}:{}/{}.idl".format(output_dir, extension, stem),
-        )
-
-    adapter_cmd_args = ctx.actions.args()
-    adapter_cmd_args.add(package_name, format = "--package-name=%s")
-    adapter_cmd_args.add(
-        adapter_arguments_file,
-        format = "--arguments-file=%s",
-    )
-    adapter_cmd_args.add(output_dir, format = "--output-dir=%s")
-    adapter_cmd_args.add(adapter_map, format = "--output-file=%s")
-
-    ctx.actions.run(
-        inputs = srcs + [adapter_arguments_file],
-        outputs = [adapter_map] + idl_files,
-        executable = ctx.executable._adapter,
-        arguments = [adapter_cmd_args],
-        mnemonic = "Ros2IdlAdapter",
-        progress_message = "Generating IDL files for %{label}",
-    )
-
-    return idl_files, idl_tuples
-
-IdlAdapterAspectInfo = provider("TBD", fields = [
-    "idl_files",
-    "idl_tuples",
-    "type_description_outputs",
-    "type_description_tuples",
-])
-
-def _artifact_base_path(repo_name):
-    return "external/{}/".format(repo_name) if repo_name else ""
-
-def _idl_adapter_aspect_impl(target, ctx):
-    package_name = target.label.name
-    srcs = target[Ros2InterfaceInfo].info.srcs
-    idl_files, idl_tuples = _run_adapter(ctx, package_name, srcs)
-
-    deps_labels = target[Ros2InterfaceInfo].deps_labels
-
-    deps_include_paths = []
-    extra_inputs = []
-    for dep in deps_labels:
-        dep_name = dep[Ros2InterfaceInfo].name
-        dep_bindir = "{}/{}{}".format(ctx.bin_dir.path, _artifact_base_path(dep.label.repo_name), dep_name)
-        deps_include_paths.append("{}:{}".format(dep_name, dep_bindir))
-        extra_inputs.extend(dep[IdlAdapterAspectInfo].type_description_outputs)
-
-    for dep in target[Ros2InterfaceInfo].deps.to_list():
-        extra_inputs.extend(dep.srcs)
-
-    type_description_outputs, type_description_include_dir = run_generator(
-        ctx,
-        srcs,
-        package_name,
-        idl_tuples,
-        idl_files,
-        ctx.executable._type_description_generator,
-        ctx.attr._type_description_templates,
-        _INTERFACE_GENERATOR_TYPE_DESCRIPTION_OUTPUT_MAPPING,
-        visibility_control_template = None,
-        mnemonic = "Ros2IdlTypeDescriptionC",
-        progress_message = "Generating Type Description for %{label}",
-        out_snake_case_stemed = False,
-        include_paths = deps_include_paths,
-        extra_inputs = extra_inputs,
-    )
-
-    type_description_tuples = []
-    for file in type_description_outputs:
-        # The outputs will be in the form of "bazel-out/<config>/<repo_name>?/<package_name>/<file_path>".
-        # We want to map the <file_path> segment to the full path of the file, replacing the .json extension
-        # with .idl.
-        prefix = ctx.bin_dir.path + "/" + _artifact_base_path(target.label.repo_name) + package_name + "/"
-        if not file.path.startswith(prefix):
-            fail("Expected type description output to start with '{}', got '{}'".format(prefix, file.path))
-
-        path = file.path[len(prefix):]
-        if not path.endswith(".json"):
-            fail("Expected type description output to end with '.json', got '{}'".format(path))
-        path = path[:-5] + ".idl"
-        type_description_tuples.append("{}:{}".format(path, file.path))
-
-    return [
-        IdlAdapterAspectInfo(
-            idl_files = idl_files,
-            idl_tuples = idl_tuples,
-            type_description_outputs = type_description_outputs,
-            type_description_tuples = type_description_tuples,
-        ),
-    ]
-
-idl_adapter_aspect = aspect(
-    implementation = _idl_adapter_aspect_impl,
-    attr_aspects = ["deps"],
-    attrs = {
-        "_type_description_generator": attr.label(
-            default = Label("@ros2_rosidl//:rosidl_generator_type_description_app"),
-            executable = True,
-            cfg = "exec",
-        ),
-        "_type_description_templates": attr.label(
-            default = Label("@ros2_rosidl//:rosidl_generator_type_description_templates"),
-        ),
-        "_adapter": attr.label(
-            default = Label("@ros2_rosidl//:rosidl_adapter_app"),
-            executable = True,
-            cfg = "exec",
-        ),
-    },
-    provides = [IdlAdapterAspectInfo],
-)
-
-def _ros2_interface_library_impl(ctx):
-    direct_deps = [dep[Ros2InterfaceInfo].info for dep in ctx.attr.deps]
-    transitive_deps = [dep[Ros2InterfaceInfo].deps for dep in ctx.attr.deps]
-    type_desc_deps = []
-    for dep in ctx.attr.deps:
-        for out in dep[Ros2InterfaceInfo].type_description_outputs:
-            type_desc_deps.append(out)
-    return [
-        DefaultInfo(files = depset(ctx.files.srcs)),
-        Ros2InterfaceInfo(
-            info = struct(
-                srcs = ctx.files.srcs,
-            ),
-            deps = depset(
-                direct = direct_deps,
-                transitive = transitive_deps,
-            ),
-            deps_labels = ctx.attr.deps,
-            name = ctx.attr.name,
-            type_description_outputs = type_desc_deps,
-        ),
-    ]
-
-ros2_interface_library = rule(
-    attrs = {
-        "srcs": attr.label_list(
-            allow_files = [".action", ".msg", ".srv"],
-            mandatory = True,
-        ),
-        "deps": attr.label_list(
-            providers = [Ros2InterfaceInfo],
-            aspects = [idl_adapter_aspect],
-        ),
-    },
-    implementation = _ros2_interface_library_impl,
-    provides = [Ros2InterfaceInfo],
-)
-
-def _get_parent_dir(path):
-    return "/".join(path.split("/")[:-1])
-
-def run_generator(
-        ctx,
-        srcs,
-        package_name,
-        idl_tuples,
-        idl_files,
-        generator,
-        generator_templates,
-        output_mapping,
-        visibility_control_template = None,
-        extra_generator_args = None,
-        extra_generated_outputs = None,
-        mnemonic = None,
-        progress_message = None,
-        extra_inputs = [],
-        type_description_tuples = [],
-        include_paths = [],
-        out_snake_case_stemed = True):
-    generator_templates = generator_templates[DefaultInfo].files.to_list()
-
-    generator_arguments_file = ctx.actions.declare_file(
-        "{}/{}_args.json".format(package_name, generator.basename),
-    )
-    output_dir = generator_arguments_file.dirname
-    generator_arguments = struct(
-        package_name = package_name,
-        idl_tuples = idl_tuples,
-        type_description_tuples = type_description_tuples,
-        output_dir = output_dir,
-        template_dir = generator_templates[0].dirname,
-        target_dependencies = [],
-        include_paths = include_paths,
-    )
-    ctx.actions.write(generator_arguments_file, generator_arguments.to_json())
-
-    generator_cmd_args = ctx.actions.args()
-    generator_cmd_args.add(
-        generator_arguments_file.path,
-        format = "--generator-arguments-file=%s",
-    )
-    if extra_generator_args:
-        for arg in extra_generator_args:
-            generator_cmd_args.add(arg)
-
-    generator_outputs = []
-    for src in srcs:
-        extension = src.extension
-        stem = _get_stem(src)
-        snake_case_stem = _to_snake_case(stem)
-        if not out_snake_case_stemed:
-            snake_case_stem = stem
-        for t in output_mapping:
-            relative_file = "{}/{}/{}".format(
-                package_name,
-                extension,
-                t % snake_case_stem,
-            )
-            generator_outputs.append(ctx.actions.declare_file(relative_file))
-
-    extra_generated_outputs = extra_generated_outputs or []
-    for extra_output in extra_generated_outputs:
-        relative_file = "{}/{}".format(package_name, extra_output)
-        generator_outputs.append(ctx.actions.declare_file(relative_file))
-
-    ctx.actions.run(
-        inputs = idl_files + generator_templates + [generator_arguments_file] + extra_inputs,
-        outputs = generator_outputs,
-        executable = generator,
-        arguments = [generator_cmd_args],
-        mnemonic = mnemonic,
-        progress_message = progress_message,
-    )
-
-    if visibility_control_template:
-        visibility_control_basename = _get_stem(visibility_control_template)
-        relative_file = "{}/msg/{}".format(
-            package_name,
-            visibility_control_basename,
-        )
-        visibility_control_h = ctx.actions.declare_file(relative_file)
-        generator_outputs.append(visibility_control_h)
-        ctx.actions.expand_template(
-            template = visibility_control_template,
-            output = visibility_control_h,
-            substitutions = {
-                "@PROJECT_NAME@": package_name,
-                "@PROJECT_NAME_UPPER@": package_name.upper(),
-            },
-        )
-
-    cc_include_dir = _get_parent_dir(output_dir)
-    return generator_outputs, cc_include_dir
-
-CGeneratorAspectInfo = provider("TBD", fields = [
-    "cc_info",
-    "type_desc",
-])
-
-_INTERFACE_GENERATOR_TYPE_DESCRIPTION_OUTPUT_MAPPING = [
-    "%s.json",
-]
-
-_INTERFACE_GENERATOR_C_OUTPUT_MAPPING = [
-    "%s.h",
-    "detail/%s__description.c",
-    "detail/%s__functions.c",
-    "detail/%s__functions.h",
-    "detail/%s__struct.h",
-    "detail/%s__type_support.h",
-]
-
-_TYPESUPPORT_GENERATOR_C_OUTPUT_MAPPING = ["%s__type_support.cpp"]
-
-_TYPESUPPORT_INTROSPECION_GENERATOR_C_OUTPUT_MAPPING = [
-    "detail/%s__rosidl_typesupport_introspection_c.h",
-    "detail/%s__type_support.c",
-]
 
 def _get_hdrs(files):
     return [
@@ -364,6 +55,7 @@ def _get_hdrs(files):
         if f.path.endswith(".h") or f.path.endswith(".hpp")
     ]
 
+
 def _get_srcs(files):
     return [
         f
@@ -371,28 +63,188 @@ def _get_srcs(files):
         if f.path.endswith(".c") or f.path.endswith(".cpp")
     ]
 
-def _get_compilation_contexts_from_deps(deps):
-    return [dep[CcInfo].compilation_context for dep in deps]
 
-def _get_compilation_contexts_from_aspect_info_deps(deps, aspect_info):
-    return [dep[aspect_info].cc_info.compilation_context for dep in deps]
+def _map_generator_outputs(
+    ctx,
+    *,
+    prefix,
+    inputs,
+    output_templates,
+    snake_case,
+):
+    """
+    Map the inputs to the outputs that would be generated by a generator. This is used to determine the outputs of a
+    generator before it is run.
 
-def _get_linking_contexts_from_deps(deps):
-    return [dep[CcInfo].linking_context for dep in deps]
+    Args:
+        ctx: The context to declare files with.
+        prefix (str): The prefix to add to the output paths.
+        inputs (list[Label]): The inputs to the generator.
+        output_templates (list[str]): The templates to use for the output paths. Each template can contain the following
+            placeholders:
+            - {stem}: The basename of the input file without the extension.
+            - {ext}: The extension of the input file without the leading period.
+        snake_case (bool): Whether to convert the input's basename to snake_case before inserting it into the output
+            templates.
+    Returns:
+        list[File]: The outputs that would be generated by the generator.
+    """
 
-def _get_linking_contexts_from_aspect_info_deps(deps, aspect_info):
-    return [dep[aspect_info].cc_info.linking_context for dep in deps]
+    outputs = []
+    for input in inputs:
+        for template in output_templates:
+            ext = input.extension
+            stem = input.basename[:-len(ext) - 1]
+            if snake_case:
+                stem = _to_snake_case(stem)
+            output = "{}/{}".format(prefix, template.format(stem = stem, ext = ext))
+            outputs.append(ctx.actions.declare_file(output))
+
+    return outputs
+
+
+def _get_template_dir(template_labels):
+    """
+    Get the directory where the templates for a generator are stored.
+
+    Args:
+        template_labels (list[Label]): The labels of the templates.
+    Returns:
+        str: The directory where the templates are stored.
+    """
+
+    if len(template_labels) < 1:
+        fail("At least one template is required")
+    return template_labels[0].dirname
+
+
+def _run_generator(
+    ctx,
+    *,
+    package_name,
+    tool,
+    inputs,
+    outputs,
+    mnemonic,
+    progress_message,
+    template_dir,
+    output_dir = None,
+    args = None,
+    include_paths = None,
+    idl_tuples = None,
+    type_description_tuples = None,
+):
+    """
+    Run the given generator tool. This is a generic function that can be used to run the different kinds of ROS2 IDL
+    code generators.
+
+    Args:
+        ctx: Context to run the generator with.
+        package_name (str): The name of the package that the generator is running for.
+        tool (Label): The label of the tool to run.
+        inputs (list[Label] | depset): The inputs to the generator.
+        outputs (list[Label]): The outputs of the generator.
+        mnemonic (str): The mnemonic to use for the action.
+        progress_message (str): The progress message to use for the action. Include '%{label}' to interpolate the target
+            label.
+        template_dir (str): The directory where the generator's templates are stored.
+        output_dir (str | None): The relative path from the repository's bindir to the directory where the generator
+            should output files. If None, the output directory will be the package name.
+        args (list[str] | None): Additional arguments to pass to the generator beyond the default ones. Defaults to an
+            empty list.
+        include_paths (list[str] | None): The include paths to pass to the generator. These are required whenever IDL
+            files are imported from other packages. Each entry must be in the format '<package_name>:<path>'.
+            Defaults to empty.
+        idl_tuples (depset | list[str] | None): The IDL tuples to pass to the generator. These are required for
+            most generators. Flattened before passing to the generator. Make sure to include each IDL file as an input
+            as well, including transitive dependencies. If a list, will be converted to a depset. Defaults to empty.
+        type_description_tuples (depset | list[str] | None): The type description tuples to pass to the generator.
+            These are required for some interface generators. Each entry must be in the format
+            '<relative_path>:<full_path>'. Flattened before passing to the generator. Make sure to include each type
+            description file as an input as well, including transitive dependencies. If a list, will be converted to a
+            depset. Defaults to empty.
+    """
+    output_dir = output_dir or package_name
+    args = args or []
+
+    if type(inputs) != "depset":
+        inputs = depset(direct = inputs)
+    if idl_tuples != None and type(idl_tuples) == "list":
+        idl_tuples = depset(direct = idl_tuples)
+    if type_description_tuples != None and type(type_description_tuples) == "list":
+        type_description_tuples = depset(direct = type_description_tuples)
+
+    # Need to prepare this ahead of time so we can get the real path to the output directory.
+    generator_arguments_file = ctx.actions.declare_file("{}/{}_generator_arguments.json".format(output_dir, mnemonic))
+    real_output_dir = generator_arguments_file.dirname
+
+    generator_arguments = struct(
+        package_name = package_name,
+        idl_tuples = idl_tuples.to_list() if idl_tuples else [],
+        type_description_tuples = type_description_tuples.to_list() if type_description_tuples else [],
+        include_paths = include_paths or [],
+        template_dir = template_dir,
+        output_dir = real_output_dir,
+        # This is used for caching at the generator level, but since Bazel does content-aware caching, we don't need
+        # to worry about it.
+        target_dependencies = [],
+    )
+    ctx.actions.write(generator_arguments_file, generator_arguments.to_json())
+
+    tool_arguments = ctx.actions.args()
+    tool_arguments.add(generator_arguments_file, format = "--generator-arguments-file=%s")
+    for arg in args:
+        tool_arguments.add(arg)
+
+    ctx.actions.run(
+        inputs = depset(
+            direct = [generator_arguments_file],
+            transitive = [inputs],
+        ),
+        outputs = outputs,
+        executable = tool,
+        arguments = [tool_arguments],
+        mnemonic = mnemonic,
+        progress_message = progress_message,
+    )
+
 
 def _compile_cc_generated_code(
-        ctx,
-        name,
-        aspect_info,
-        srcs,
-        hdrs,
-        deps,
-        cc_include_dir,
-        copts,
-        target = None):
+    ctx,
+    *,
+    name,
+    srcs,
+    hdrs,
+    deps,
+    includes,
+    providers,
+    copts = [],
+    conlyopts = [],
+    cxxopts = [],
+):
+    """
+    Compile generated C++ code.
+
+    Args:
+        ctx: The aspect context.
+        name (str): The name of the target.
+        srcs (list[Label]): The source files to compile.
+        hdrs (list[Label]): The header files to compile.
+        deps (list[Label]): The dependencies of the target. This should include both the dependencies of the target and
+            runtime support libraries for the generated code.
+        includes (list[str]): The include directories to use when compiling.
+        providers (list[provider]): For targets that generate compilation results through aspects, the providers that
+            contain CcInfo instances that should be used as dependencies.
+        copts (list[str]): The compile options for both C and C++ files.
+        conlyopts (list[str]): The compile options for C files only.
+        cxxopts (list[str]): The compile options for C++ files only.
+    Returns:
+        A struct containing:
+        - cc_info: The compilation information for the generated C++ code.
+        - compilation_outputs: The outputs of the compilation.
+        - linking_outputs: The outputs of the link operation.
+    """
+
     cc_toolchain = find_cpp_toolchain(ctx)
     feature_configuration = cc_common.configure_features(
         ctx = ctx,
@@ -400,36 +252,41 @@ def _compile_cc_generated_code(
         requested_features = ctx.features,
         unsupported_features = ctx.disabled_features,
     )
-    rule_deps = []
-    rule_deps.extend(ctx.rule.attr.deps)
-    if target != None:
-        rule_deps.append(target)
-    compilation_contexts = (
-        _get_compilation_contexts_from_aspect_info_deps(
-            rule_deps,
-            aspect_info,
-        ) +
-        _get_compilation_contexts_from_deps(deps)
-    )
+
+    compilation_contexts = [
+        dep[CcInfo].compilation_context
+        for dep in deps
+        if CcInfo in dep
+    ] + [
+        dep[provider].cc_info.compilation_context
+        for provider in providers
+        for dep in deps
+        if provider in dep
+    ]
     compilation_context, compilation_outputs = cc_common.compile(
         actions = ctx.actions,
         name = name,
-        cc_toolchain = cc_toolchain,
-        feature_configuration = feature_configuration,
-        user_compile_flags = copts,
-        system_includes = [cc_include_dir],
         srcs = srcs,
         public_hdrs = hdrs,
+        includes = includes,
+        user_compile_flags = copts,
+        conly_flags = conlyopts,
+        cxx_flags = cxxopts,
+        cc_toolchain = cc_toolchain,
+        feature_configuration = feature_configuration,
         compilation_contexts = compilation_contexts,
     )
 
-    linking_contexts = (
-        _get_linking_contexts_from_aspect_info_deps(
-            rule_deps,
-            aspect_info,
-        ) +
-        _get_linking_contexts_from_deps(deps)
-    )
+    linking_contexts = [
+        dep[CcInfo].linking_context
+        for dep in deps
+        if CcInfo in dep
+    ] + [
+        dep[provider].cc_info.linking_context
+        for provider in providers
+        for dep in deps
+        if provider in dep
+    ]
     linking_context, linking_outputs = cc_common.create_linking_context_from_compilation_outputs(
         actions = ctx.actions,
         name = name,
@@ -450,117 +307,562 @@ def _compile_cc_generated_code(
         linking_outputs = linking_outputs,
     )
 
-def _c_generator_aspect_impl(target, ctx):
+
+def _generate_visibility_control(
+    ctx,
+    *,
+    prefix,
+    package_name,
+    template,
+):
+    """
+    Generate a visibility control header file for a generated C++ library.
+
+    Args:
+        ctx: The aspect context.
+        prefix (str): The prefix to add to the output path.
+        package_name (str): The name of the package that the library is for.
+        template (File): The template to use for the visibility control header file.
+    Returns:
+        File: The generated visibility control header file.
+    """
+
+    if not (template.basename.endswith(".h.in") or template.basename.endswith(".hpp.in")):
+        fail("Visibility control template must have a .h.in or .hpp.in extension")
+
+    output = ctx.actions.declare_file("{}/msg/{}".format(prefix, template.basename[:-3]))
+    ctx.actions.expand_template(
+        template = template,
+        output = output,
+        substitutions = {
+            "@PROJECT_NAME@": package_name,
+            "@PROJECT_NAME_UPPER@": package_name.upper(),
+        },
+    )
+
+    return output
+
+### Providers ###
+
+RosInterfaceInfo = provider(
+    doc = "Information about a ROS interface.",
+    fields = {
+        "srcs": "The .action/.msg/.srv files that make up the interface.",
+        "deps": "The dependencies of the ROS interface (themselves ROS interfaces).",
+    },
+)
+
+IdlAdapterInfo = provider(
+    doc = "Information about the generated IDL files for a ROS2 interface.",
+    fields = {
+        "direct_files": "The generated IDL files for this interface only.",
+        "files": "The generated IDL files for this interface and all its dependencies.",
+        "direct_tuples": "The tuples that would be generated by rosidl_adapter for this interface only.",
+        "tuples": "The tuples that would be generated by rosidl_adapter for this interface and all its dependencies.",
+    },
+)
+
+TypeDescriptionInfo = provider(
+    doc = "Information about the generated type descriptions for a ROS2 interface.",
+    fields = {
+        "direct_files": "The generated type support files for this interface only.",
+        "files": "The generated type support files for this interface and all its dependencies.",
+        "direct_tuples": "The tuples that would be generated by rosidl_generator_type_description for this interface only.",
+        "tuples": "The tuples that would be generated by rosidl_generator_type_description for this interface and all its dependencies.",
+    },
+)
+
+CGeneratorInfo = provider(
+    doc = "Information about the generated C code for a ROS2 interface.",
+    fields = {
+        "cc_info": "The compilation information for the generated C code.",
+    },
+)
+
+CppGeneratorInfo = provider(
+    doc = "Information about the generated C++ code for a ROS2 interface.",
+    fields = {
+        "cc_info": "The compilation information for the generated C++ code.",
+    },
+)
+
+PyGeneratorInfo = provider(
+    doc = "Information about the generated Python code for a ROS2 interface.",
+    fields = {
+        "cc_info": "Compilation information for the Python extension modules. This is only used internally, and is not visible to users.",
+        "dynamic_libraries": "The dynamic libraries that contain the Python extension modules.",
+        "transitive_sources": "The full set of sources for this interface and all its dependencies.",
+        "imports": "Import paths for the Python extension modules. These are relative within runfiles.",
+        "linker_inputs": "The linker inputs for the Python extension modules.",
+    },
+)
+
+### IDL Adapter ###
+
+def _idl_adapter_aspect_impl(target, ctx):
+    """
+    Convert ROS .action/.msg/.srv files to ROS2 .idl files. This is required
+    for all code generators that use ROS2 interfaces.
+
+    Args:
+        target (Target): The target that the aspect is attached to.
+        ctx: The aspect context.
+    """
+
+    # Each package exports one ROS interface.
     package_name = target.label.name
-    srcs = target[Ros2InterfaceInfo].info.srcs
-    adapter = target[IdlAdapterAspectInfo]
+    # The sources for this ROS2 interface. Guaranteed to only contain .action/.msg/.srv files.
+    srcs = target[RosInterfaceInfo].srcs
 
-    interface_outputs, cc_include_dir = run_generator(
-        ctx,
-        srcs,
-        package_name,
-        adapter.idl_tuples,
-        adapter.idl_files,
-        ctx.executable._interface_generator,
-        ctx.attr._interface_templates,
-        _INTERFACE_GENERATOR_C_OUTPUT_MAPPING,
-        visibility_control_template = ctx.file._interface_visibility_control_template,
-        mnemonic = "Ros2IdlGeneratorC",
-        progress_message = "Generating C IDL interfaces for %{label}",
-        extra_inputs = adapter.type_description_outputs,
-        type_description_tuples = adapter.type_description_tuples,
+    # The generated .idl files.
+    outputs = []
+    # The inputs that will be passed to the adapter, as non-IDL tuples.
+    non_idl_tuples = []
+    # What would be generated by rosidl_adapter. Since we cannot read its
+    # contents at the Bazel level, we need to generate the same output here.
+    idl_tuples = []
+
+    # Output directory relative to this repository's output directory.
+    output_dir = "rosidl_adapter/{}".format(package_name)
+    adapter_map_file = ctx.actions.declare_file("{}/{}.idls".format(output_dir, package_name))
+    # The actual output directory, starting with the bin_dir.
+    real_output_dir = adapter_map_file.dirname
+
+    # The output filename is _always_ in the format:
+    # <output_dir>/<original_extension>/<target_stem>.idl
+    # output_dir is package_name in our case.
+    for src in srcs:
+        extension = src.extension
+        stem = src.basename[:-len(extension) - 1]
+
+        non_idl_tuples.append(".:{}".format(src.path))
+        idl_tuples.append("{}:{}/{}.idl".format(real_output_dir, extension, stem))
+
+        idl_output = ctx.actions.declare_file("{}/{}/{}.idl".format(output_dir, extension, stem))
+        outputs.append(idl_output)
+
+    adapter_arguments = struct(
+        package_name = package_name,
+        non_idl_tuples = non_idl_tuples,
     )
+    adapter_arguments_file = ctx.actions.declare_file("{}/rosidl_adapter_arguments.json".format(output_dir))
+    ctx.actions.write(adapter_arguments_file, adapter_arguments.to_json())
 
-    typesupport_outputs, _ = run_generator(
-        ctx,
-        srcs,
-        package_name,
-        adapter.idl_tuples,
-        adapter.idl_files,
-        ctx.executable._typesupport_generator,
-        ctx.attr._typesupport_templates,
-        _TYPESUPPORT_GENERATOR_C_OUTPUT_MAPPING,
-        visibility_control_template = ctx.file._typesupport_introspection_visibility_control_template,
-        extra_generator_args = [
-            # TODO(mvukov) There are also rosidl_typesupport_connext_c and
-            # rosidl_typesupport_fastrtps_c.
-            "--typesupports=rosidl_typesupport_introspection_c",
-        ],
-        mnemonic = "Ros2IdlTypeSupportC",
-        progress_message = "Generating C type support for %{label}",
-    )
+    cmd_arguments = ctx.actions.args()
+    cmd_arguments.add(package_name, format = "--package-name=%s")
+    cmd_arguments.add(adapter_arguments_file, format = "--arguments-file=%s")
+    cmd_arguments.add(real_output_dir, format = "--output-dir=%s")
+    cmd_arguments.add(adapter_map_file, format = "--output-file=%s")
 
-    typesupport_introspection_outputs, _ = run_generator(
-        ctx,
-        srcs,
-        package_name,
-        adapter.idl_tuples,
-        adapter.idl_files,
-        ctx.executable._typesupport_introspection_generator,
-        ctx.attr._typesupport_introspection_templates,
-        _TYPESUPPORT_INTROSPECION_GENERATOR_C_OUTPUT_MAPPING,
-        visibility_control_template = ctx.file._typesupport_introspection_visibility_control_template,
-        mnemonic = "Ros2IdlTypeSupportIntrospectionC",
-        progress_message = "Generating C type introspection support for %{label}",
-    )
-
-    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs
-    hdrs = _get_hdrs(all_outputs)
-    srcs = _get_srcs(all_outputs)
-
-    compilation_info = _compile_cc_generated_code(
-        ctx,
-        name = package_name + "_c",
-        aspect_info = CGeneratorAspectInfo,
-        srcs = srcs,
-        hdrs = hdrs,
-        deps = ctx.attr._c_deps,
-        cc_include_dir = cc_include_dir,
-        copts = ctx.attr._c_copts,
+    ctx.actions.run(
+        inputs = srcs + [adapter_arguments_file],
+        outputs = outputs + [adapter_map_file],
+        executable = ctx.executable._adapter,
+        arguments = [cmd_arguments],
+        mnemonic = "IdlAdapter",
+        progress_message = "Generating IDL files for %{label}",
     )
 
     return [
-        CGeneratorAspectInfo(cc_info = compilation_info.cc_info),
+        IdlAdapterInfo(
+            direct_files = outputs,
+            files = depset(
+                direct = outputs,
+                transitive = [dep[IdlAdapterInfo].files for dep in ctx.rule.attr.deps],
+            ),
+            direct_tuples = idl_tuples,
+            tuples = depset(
+                direct = idl_tuples,
+                transitive = [dep[IdlAdapterInfo].tuples for dep in ctx.rule.attr.deps],
+            ),
+        ),
     ]
+
+idl_adapter_aspect = aspect(
+    implementation = _idl_adapter_aspect_impl,
+    attr_aspects = ["deps"],
+    provides = [IdlAdapterInfo],
+    attrs = {
+        "_adapter": attr.label(
+            default = Label("@ros2_rosidl//:rosidl_adapter_app"),
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+)
+
+### Type Description Generation ###
+
+def _bindir_repository_dir(repo_name):
+    """
+    Return the directory relative to the Bazel bindir where a repository's
+    artifacts are stored. This will be empty for the current repository, and
+    'external/<repo_absolute_name>' for external repositories.
+
+    Args:
+        repo_name (str): The name of the repository, as returned by
+            Label.repo_name.
+    Returns:
+        str: The directory relative to the Bazel bindir where the repository's
+            artifacts are stored.
+    """
+
+    return "external/{}/".format(repo_name) if repo_name else ""
+
+
+def _type_description_aspect_impl(target, ctx):
+    """
+    Generate type support files for a ROS2 IDL file.
+
+    Args:
+        target (Target): The target that the aspect is attached to.
+        ctx: The aspect context.
+    """
+
+    # Each package exports one ROS interface.
+    package_name = target.label.name
+    output_dir = "rosidl_generator_type_description/{}".format(package_name)
+
+    # The sources for this ROS2 interface. Guaranteed to only contain .action/.msg/.srv files.
+    srcs = target[RosInterfaceInfo].srcs
+    type_description_templates = ctx.attr._type_description_templates[DefaultInfo].files.to_list()
+
+    inputs = []
+    transitive_inputs = []
+
+    inputs.extend(srcs)
+    inputs.extend(type_description_templates)
+    transitive_inputs.append(target[IdlAdapterInfo].files)
+
+    # A mapping of a package to the directory where the IDL files are stored.
+    # This is for importing IDL files from other packages.
+    include_paths = []
+    for dependency in ctx.rule.attr.deps:
+        dependency_package_name = dependency.label.name
+        # Something like bazel-out/<config>/bin/external/<repo_name>/rosidl_adapter/<package_name>
+        # (or bazel-out/<config>/bin/rosidl_adapter/<package_name> for the current repository).
+        dependency_package_root = "{}/{}rosidl_generator_type_description/{}".format(
+            ctx.bin_dir.path,
+            _bindir_repository_dir(dependency.label.repo_name),
+            dependency_package_name,
+        )
+
+        include_paths.append("{}:{}".format(dependency_package_name, dependency_package_root))
+        transitive_inputs.append(dependency[IdlAdapterInfo].files)
+        transitive_inputs.append(dependency[TypeDescriptionInfo].files)
+        inputs.extend(dependency[RosInterfaceInfo].srcs)
+
+    outputs = _map_generator_outputs(
+        ctx,
+        prefix = output_dir,
+        inputs = srcs,
+        output_templates = ["{ext}/{stem}.json"],
+        snake_case = False,
+    )
+
+    _run_generator(
+        ctx,
+        package_name = package_name,
+        tool = ctx.executable._type_description_generator,
+        inputs = depset(
+            direct = inputs,
+            transitive = transitive_inputs,
+        ),
+        outputs = outputs,
+        mnemonic = "RosTypeDescription",
+        progress_message = "Generating type description for %{label}",
+        include_paths = include_paths,
+        output_dir = output_dir,
+        template_dir = _get_template_dir(type_description_templates),
+        idl_tuples = target[IdlAdapterInfo].tuples,
+    )
+
+    type_description_tuples = []
+    for output in outputs:
+        # The outputs will be in the form of "bazel-out/<config>/<repo_name>?/<package_name>/rosidl_generator_type_description/<file_path>".
+        # We want to map the <file_path> segment to the full path of the file, replacing the .json extension
+        # with .idl.
+        prefix = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name) + "rosidl_generator_type_description/" + package_name + "/"
+        if not output.path.startswith(prefix):
+            fail("Expected type description output to start with '{}', got '{}'".format(prefix, output.path))
+
+        path = output.path[len(prefix):]
+        if not path.endswith(".json"):
+            fail("Expected type description output to end with '.json', got '{}'".format(path))
+        path = path[:-5] + ".idl"
+        type_description_tuples.append("{}:{}".format(path, output.path))
+
+    return [
+        TypeDescriptionInfo(
+            direct_files = outputs,
+            files = depset(
+                direct = outputs,
+                transitive = [dep[TypeDescriptionInfo].files for dep in ctx.rule.attr.deps],
+            ),
+            direct_tuples = type_description_tuples,
+            tuples = depset(
+                direct = type_description_tuples,
+                transitive = [dep[TypeDescriptionInfo].tuples for dep in ctx.rule.attr.deps],
+            ),
+        ),
+    ]
+
+type_description_aspect = aspect(
+    implementation = _type_description_aspect_impl,
+    attr_aspects = ["deps"],
+    required_aspect_providers = [IdlAdapterInfo],
+    provides = [TypeDescriptionInfo],
+    attrs = {
+        "_type_description_generator": attr.label(
+            default = Label("@ros2_rosidl//:rosidl_generator_type_description_app"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_type_description_templates": attr.label(
+            default = Label("@ros2_rosidl//:rosidl_generator_type_description_templates"),
+        ),
+    },
+)
+
+### C Generator ###
+
+def _c_generator_aspect_impl(target, ctx):
+    """
+    Generate C code for a ROS2 interface library.
+
+    Args:
+        target (Target): The target that the aspect is attached to.
+        ctx: The aspect context.
+    """
+
+    # Each package exports one ROS interface.
+    package_name = target.label.name
+
+    srcs = target[RosInterfaceInfo].srcs
+    adapter_info = target[IdlAdapterInfo]
+    type_description_info = target[TypeDescriptionInfo]
+
+    interface_templates = ctx.attr._c_interface_templates[DefaultInfo].files.to_list()
+
+    # Stage 1: Generate the C interfaces.
+
+    interface_inputs = []
+    interface_transitive_inputs = []
+
+    interface_inputs.extend(srcs)
+    interface_inputs.extend(interface_templates)
+    interface_transitive_inputs.append(adapter_info.files)
+    interface_transitive_inputs.append(type_description_info.files)
+
+    interface_output_dir = "rosidl_generator_c/{}".format(package_name)
+
+    interface_outputs = _map_generator_outputs(
+        ctx,
+        prefix = interface_output_dir,
+        inputs = srcs,
+        output_templates = [
+            "{ext}/{stem}.h",
+            "{ext}/detail/{stem}__description.c",
+            "{ext}/detail/{stem}__functions.c",
+            "{ext}/detail/{stem}__functions.h",
+            "{ext}/detail/{stem}__struct.h",
+            "{ext}/detail/{stem}__type_support.c",
+            "{ext}/detail/{stem}__type_support.h",
+        ],
+        snake_case = True,
+    )
+
+    _run_generator(
+        ctx,
+        package_name = package_name,
+        tool = ctx.executable._c_interface_generator,
+        inputs = depset(
+            direct = interface_inputs,
+            transitive = interface_transitive_inputs,
+        ),
+        outputs = interface_outputs,
+        mnemonic = "RosCInterface",
+        progress_message = "Generating C interfaces for %{label}",
+        template_dir = _get_template_dir(interface_templates),
+        output_dir = interface_output_dir,
+        idl_tuples = adapter_info.tuples,
+        type_description_tuples = type_description_info.tuples,
+    )
+
+    interface_visibility_control = _generate_visibility_control(
+        ctx,
+        prefix = interface_output_dir,
+        package_name = package_name,
+        template = ctx.file._c_interface_visibility_control_template,
+    )
+
+    # Stage 2: Generate the C typesupport files.
+
+    typesupport_templates = ctx.attr._c_typesupport_templates[DefaultInfo].files.to_list()
+
+    typesupport_inputs = []
+    typesupport_transitive_inputs = []
+
+    typesupport_inputs.extend(srcs)
+    typesupport_inputs.extend(typesupport_templates)
+    typesupport_transitive_inputs.append(adapter_info.files)
+
+    typesupport_output_dir = "rosidl_typesupport_c/{}".format(package_name)
+
+    typesupport_outputs = _map_generator_outputs(
+        ctx,
+        prefix = typesupport_output_dir,
+        inputs = srcs,
+        output_templates = [
+            "{ext}/{stem}__type_support.cpp",
+        ],
+        snake_case = True,
+    )
+
+    _run_generator(
+        ctx,
+        package_name = package_name,
+        tool = ctx.executable._c_typesupport_generator,
+        inputs = depset(
+            direct = typesupport_inputs,
+            transitive = typesupport_transitive_inputs,
+        ),
+        outputs = typesupport_outputs,
+        args = [
+            # TODO(mvukov) There are also rosidl_typesupport_connext_c and rosidl_typesupport_fastrtps_c.
+            "--typesupports=rosidl_typesupport_introspection_c",
+        ],
+        mnemonic = "RosCTypeSupport",
+        progress_message = "Generating C type support for %{label}",
+        template_dir = _get_template_dir(typesupport_templates),
+        output_dir = typesupport_output_dir,
+        idl_tuples = adapter_info.tuples,
+    )
+
+    # Stage 3: Generate the C typesupport introspection files.
+
+    typesupport_introspection_templates = ctx.attr._c_typesupport_introspection_templates[DefaultInfo].files.to_list()
+
+    typesupport_introspection_inputs = []
+    typesupport_introspection_transitive_inputs = []
+
+    typesupport_introspection_inputs.extend(srcs)
+    typesupport_introspection_inputs.extend(typesupport_introspection_templates)
+    typesupport_introspection_transitive_inputs.append(adapter_info.files)
+
+    typesupport_introspection_output_dir = "rosidl_typesupport_introspection_c/{}".format(package_name)
+
+    typesupport_introspection_outputs = _map_generator_outputs(
+        ctx,
+        prefix = typesupport_introspection_output_dir,
+        inputs = srcs,
+        output_templates = [
+            "{ext}/detail/{stem}__rosidl_typesupport_introspection_c.h",
+            "{ext}/detail/{stem}__type_support.c",
+        ],
+        snake_case = True,
+    )
+
+    _run_generator(
+        ctx,
+        package_name = package_name,
+        tool = ctx.executable._c_typesupport_introspection_generator,
+        inputs = depset(
+            direct = typesupport_introspection_inputs,
+            transitive = typesupport_introspection_transitive_inputs,
+        ),
+        outputs = typesupport_introspection_outputs,
+        mnemonic = "RosCTypeSupportIntrospection",
+        progress_message = "Generating C type introspection support for %{label}",
+        template_dir = _get_template_dir(typesupport_introspection_templates),
+        output_dir = typesupport_introspection_output_dir,
+        idl_tuples = adapter_info.tuples,
+    )
+
+    typesupport_introspection_visibility_control = _generate_visibility_control(
+        ctx,
+        prefix = typesupport_introspection_output_dir,
+        package_name = package_name,
+        template = ctx.file._c_typesupport_introspection_visibility_control_template,
+    )
+
+    # Stage 4: Compile the generated C code into a library.
+
+    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs + [
+        interface_visibility_control,
+        typesupport_introspection_visibility_control,
+    ]
+
+
+    include_base = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name)
+    include_paths = [
+        include_base + "rosidl_generator_c",
+        include_base + "rosidl_typesupport_c",
+        include_base + "rosidl_typesupport_introspection_c",
+    ]
+
+    compile_result = _compile_cc_generated_code(
+        ctx,
+        name = package_name + "_c",
+        srcs = _get_srcs(all_outputs),
+        hdrs = _get_hdrs(all_outputs),
+        deps = ctx.attr._c_deps + ctx.rule.attr.deps,
+        includes = include_paths,
+        conlyopts = C_COPTS,
+        providers = [CGeneratorInfo],
+    )
+
+    return [
+        CGeneratorInfo(
+            cc_info = compile_result.cc_info,
+        ),
+    ]
+
 
 c_generator_aspect = aspect(
     implementation = _c_generator_aspect_impl,
     attr_aspects = ["deps"],
+    required_providers = [RosInterfaceInfo],
+    required_aspect_providers = [[IdlAdapterInfo], [TypeDescriptionInfo]],
+    provides = [CGeneratorInfo],
+    toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
+    fragments = ["cpp"],
     attrs = {
-        "_interface_generator": attr.label(
+        # C interface generator
+        "_c_interface_generator": attr.label(
             default = Label("@ros2_rosidl//:rosidl_generator_c_app"),
             executable = True,
             cfg = "exec",
         ),
-        "_interface_templates": attr.label(
+        "_c_interface_templates": attr.label(
             default = Label("@ros2_rosidl//:rosidl_generator_c_templates"),
         ),
-        "_interface_visibility_control_template": attr.label(
+        # Visibility control
+        "_c_interface_visibility_control_template": attr.label(
             default = Label("@ros2_rosidl//:rosidl_generator_c/resource/rosidl_generator_c__visibility_control.h.in"),
             allow_single_file = True,
         ),
-        "_typesupport_generator": attr.label(
+        # Typesupport generator
+        "_c_typesupport_generator": attr.label(
             default = Label("@ros2_rosidl_typesupport//:rosidl_typesupport_generator_c_app"),
             executable = True,
             cfg = "exec",
         ),
-        "_typesupport_templates": attr.label(
+        "_c_typesupport_templates": attr.label(
             default = Label("@ros2_rosidl_typesupport//:rosidl_typesupport_generator_c_templates"),
         ),
-        "_typesupport_introspection_generator": attr.label(
+        # Typesupport introspection generator
+        "_c_typesupport_introspection_generator": attr.label(
             default = Label("@ros2_rosidl//:rosidl_typesupport_introspection_generator_c"),
             executable = True,
             cfg = "exec",
         ),
-        "_typesupport_introspection_templates": attr.label(
+        "_c_typesupport_introspection_templates": attr.label(
             default = Label("@ros2_rosidl//:rosidl_typesupport_introspection_generator_c_templates"),
         ),
-        "_typesupport_introspection_visibility_control_template": attr.label(
+        "_c_typesupport_introspection_visibility_control_template": attr.label(
             default = Label("@ros2_rosidl//:rosidl_typesupport_introspection_c/resource/rosidl_typesupport_introspection_c__visibility_control.h.in"),
             allow_single_file = True,
-        ),
-        "_c_copts": attr.string_list(
-            default = C_COPTS,
         ),
         "_c_deps": attr.label_list(
             default = [
@@ -574,162 +876,233 @@ c_generator_aspect = aspect(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
         ),
     },
-    required_providers = [Ros2InterfaceInfo],
-    required_aspect_providers = [IdlAdapterAspectInfo],
-    provides = [CGeneratorAspectInfo],
-    toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
-    fragments = ["cpp"],
 )
 
-def _cc_generator_impl(ctx, aspect_info):
-    cc_info = cc_common.merge_cc_infos(
-        direct_cc_infos = [dep[aspect_info].cc_info for dep in ctx.attr.deps],
-    )
-    return [cc_info]
-
-def _c_ros2_interface_library_impl(ctx):
-    return _cc_generator_impl(ctx, CGeneratorAspectInfo)
-
-c_ros2_interface_library = rule(
-    attrs = {
-        "deps": attr.label_list(
-            mandatory = True,
-            aspects = [idl_adapter_aspect, c_generator_aspect],
-            providers = [Ros2InterfaceInfo],
-        ),
-    },
-    implementation = _c_ros2_interface_library_impl,
-)
-
-CppGeneratorAspectInfo = provider("TBD", fields = [
-    "cc_info",
-    "compilation_outputs",
-])
-
-_INTERFACE_GENERATOR_CPP_OUTPUT_MAPPING = [
-    "%s.hpp",
-    "detail/%s__builder.hpp",
-    "detail/%s__struct.hpp",
-    "detail/%s__traits.hpp",
-    "detail/%s__type_support.hpp",
-]
-
-_TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING = [
-    "%s__type_support.cpp",
-]
-
-_TYPESUPPORT_INTROSPECION_GENERATOR_CPP_OUTPUT_MAPPING = [
-    "detail/%s__rosidl_typesupport_introspection_cpp.hpp",
-    "detail/%s__type_support.cpp",
-]
+### C++ Generator ###
 
 def _cpp_generator_aspect_impl(target, ctx):
-    package_name = target.label.name
-    srcs = target[Ros2InterfaceInfo].info.srcs
-    adapter = target[IdlAdapterAspectInfo]
+    """
+    Generate C++ code for a ROS2 interface library.
 
-    interface_outputs, cc_include_dir = run_generator(
+    Args:
+        target (Target): The target that the aspect is attached to.
+        ctx: The aspect context.
+    """
+
+    # Each package exports one ROS interface.
+    package_name = target.label.name
+
+    srcs = target[RosInterfaceInfo].srcs
+    adapter_info = target[IdlAdapterInfo]
+    type_description_info = target[TypeDescriptionInfo]
+
+    # Stage 1: Generate the C++ interfaces.
+
+    interface_templates = ctx.attr._cpp_interface_templates[DefaultInfo].files.to_list()
+
+    interface_output_dir = "rosidl_generator_cpp/{}".format(package_name)
+
+    interface_inputs = []
+    interface_transitive_inputs = []
+
+    interface_inputs.extend(srcs)
+    interface_inputs.extend(interface_templates)
+    interface_transitive_inputs.append(adapter_info.files)
+    interface_transitive_inputs.append(type_description_info.files)
+
+    interface_outputs = _map_generator_outputs(
         ctx,
-        srcs,
-        package_name,
-        adapter.idl_tuples,
-        adapter.idl_files,
-        ctx.executable._interface_generator,
-        ctx.attr._interface_templates,
-        _INTERFACE_GENERATOR_CPP_OUTPUT_MAPPING,
-        mnemonic = "Ros2IdlGeneratorCpp",
-        progress_message = "Generating C++ IDL interfaces for %{label}",
+        prefix = interface_output_dir,
+        inputs = srcs,
+        output_templates = [
+            "{ext}/{stem}.hpp",
+            "{ext}/detail/{stem}__builder.hpp",
+            "{ext}/detail/{stem}__struct.hpp",
+            "{ext}/detail/{stem}__traits.hpp",
+            "{ext}/detail/{stem}__type_support.hpp",
+        ],
+        snake_case = True,
     )
 
-    typesupport_outputs, _ = run_generator(
+    _run_generator(
         ctx,
-        srcs,
-        package_name,
-        adapter.idl_tuples,
-        adapter.idl_files,
-        ctx.executable._typesupport_generator,
-        ctx.attr._typesupport_templates,
-        _TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING,
-        visibility_control_template = ctx.file._interface_visibility_control_template,
-        extra_generator_args = [
-            # TODO(mvukov) There are also rosidl_typesupport_connext_cpp and
-            # rosidl_typesupport_fastrtps_cpp.
+        package_name = package_name,
+        tool = ctx.executable._cpp_interface_generator,
+        inputs = depset(
+            direct = interface_inputs,
+            transitive = interface_transitive_inputs,
+        ),
+        outputs = interface_outputs,
+        mnemonic = "RosCppInterface",
+        progress_message = "Generating C++ interfaces for %{label}",
+        template_dir = _get_template_dir(interface_templates),
+        output_dir = interface_output_dir,
+        idl_tuples = adapter_info.tuples,
+        type_description_tuples = type_description_info.tuples,
+    )
+
+    interface_visibility_control = _generate_visibility_control(
+        ctx,
+        prefix = interface_output_dir,
+        package_name = package_name,
+        template = ctx.file._cpp_interface_visibility_control_template,
+    )
+
+    # Stage 2: Generate the C++ typesupport files.
+
+    typesupport_templates = ctx.attr._cpp_typesupport_templates[DefaultInfo].files.to_list()
+
+    typesupport_inputs = []
+    typesupport_transitive_inputs = []
+
+    typesupport_inputs.extend(srcs)
+    typesupport_inputs.extend(typesupport_templates)
+    typesupport_transitive_inputs.append(adapter_info.files)
+
+    typesupport_output_dir = "rosidl_typesupport_cpp/{}".format(package_name)
+
+    typesupport_outputs = _map_generator_outputs(
+        ctx,
+        prefix = typesupport_output_dir,
+        inputs = srcs,
+        output_templates = [
+            "{ext}/{stem}__type_support.cpp",
+        ],
+        snake_case = True,
+    )
+
+    _run_generator(
+        ctx,
+        package_name = package_name,
+        tool = ctx.executable._cpp_typesupport_generator,
+        inputs = depset(
+            direct = typesupport_inputs,
+            transitive = typesupport_transitive_inputs,
+        ),
+        outputs = typesupport_outputs,
+        args = [
+            # TODO(mvukov) There are also rosidl_typesupport_connext_cpp and rosidl_typesupport_fastrtps_cpp.
             "--typesupports=rosidl_typesupport_introspection_cpp",
         ],
-        mnemonic = "Ros2IdlTypeSupportCpp",
+        mnemonic = "RosCppTypeSupport",
         progress_message = "Generating C++ type support for %{label}",
+        template_dir = _get_template_dir(typesupport_templates),
+        output_dir = typesupport_output_dir,
+        idl_tuples = adapter_info.tuples,
     )
 
-    typesupport_introspection_outputs, _ = run_generator(
+    # Stage 3: Generate the C++ typesupport introspection files.
+
+    typesupport_introspection_templates = ctx.attr._cpp_typesupport_introspection_templates[DefaultInfo].files.to_list()
+
+    typesupport_introspection_inputs = []
+    typesupport_introspection_transitive_inputs = []
+
+    typesupport_introspection_inputs.extend(srcs)
+    typesupport_introspection_inputs.extend(typesupport_introspection_templates)
+    typesupport_introspection_transitive_inputs.append(adapter_info.files)
+
+    typesupport_introspection_output_dir = "rosidl_typesupport_introspection_cpp/{}".format(package_name)
+
+    typesupport_introspection_outputs = _map_generator_outputs(
         ctx,
-        srcs,
-        package_name,
-        adapter.idl_tuples,
-        adapter.idl_files,
-        ctx.executable._typesupport_introspection_generator,
-        ctx.attr._typesupport_introspection_templates,
-        _TYPESUPPORT_INTROSPECION_GENERATOR_CPP_OUTPUT_MAPPING,
-        mnemonic = "Ros2IdlTypeSupportIntrospectionCpp",
-        progress_message = "Generating C++ type introspection support for %{label}",
+        prefix = typesupport_introspection_output_dir,
+        inputs = srcs,
+        output_templates = [
+            "{ext}/detail/{stem}__rosidl_typesupport_introspection_cpp.hpp",
+            "{ext}/detail/{stem}__type_support.cpp",
+        ],
+        snake_case = True,
     )
 
-    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs
-    hdrs = _get_hdrs(all_outputs)
-    srcs = _get_srcs(all_outputs)
+    _run_generator(
+        ctx,
+        package_name = package_name,
+        tool = ctx.executable._cpp_typesupport_introspection_generator,
+        inputs = depset(
+            direct = typesupport_introspection_inputs,
+            transitive = typesupport_introspection_transitive_inputs,
+        ),
+        outputs = typesupport_introspection_outputs,
+        mnemonic = "RosCppTypeSupportIntrospection",
+        progress_message = "Generating C++ type introspection support for %{label}",
+        template_dir = _get_template_dir(typesupport_introspection_templates),
+        output_dir = typesupport_introspection_output_dir,
+        idl_tuples = adapter_info.tuples,
+    )
+
+    # Stage 4: Compile the generated C++ code into a library.
+
+    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs + [
+        interface_visibility_control,
+    ]
+
+    include_base = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name)
+    include_paths = [
+        include_base + "rosidl_generator_cpp",
+        include_base + "rosidl_typesupport_cpp",
+        include_base + "rosidl_typesupport_introspection_cpp",
+    ]
 
     compilation_info = _compile_cc_generated_code(
         ctx,
         name = package_name + "_cpp",
-        aspect_info = CppGeneratorAspectInfo,
-        srcs = srcs,
-        hdrs = hdrs,
-        deps = ctx.attr._cpp_deps,
-        cc_include_dir = cc_include_dir,
-        copts = ctx.attr._cpp_copts,
+        srcs = _get_srcs(all_outputs),
+        hdrs = _get_hdrs(all_outputs),
+        deps = ctx.attr._cpp_deps + ctx.rule.attr.deps + [target],
+        includes = include_paths,
+        cxxopts = CPP_COPTS,
+        providers = [CGeneratorInfo, CppGeneratorInfo],
     )
 
     return [
-        CppGeneratorAspectInfo(
+        CppGeneratorInfo(
             cc_info = compilation_info.cc_info,
-            compilation_outputs = compilation_info.compilation_outputs,
         ),
     ]
+
 
 cpp_generator_aspect = aspect(
     implementation = _cpp_generator_aspect_impl,
     attr_aspects = ["deps"],
+    required_providers = [RosInterfaceInfo],
+    required_aspect_providers = [[IdlAdapterInfo], [TypeDescriptionInfo], [CGeneratorInfo]],
+    provides = [CppGeneratorInfo],
+    toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
+    fragments = ["cpp"],
     attrs = {
-        "_interface_generator": attr.label(
+        # C++ interface generator
+        "_cpp_interface_generator": attr.label(
             default = Label("@ros2_rosidl//:rosidl_generator_cpp_app"),
             executable = True,
             cfg = "exec",
         ),
-        "_interface_templates": attr.label(
+        "_cpp_interface_templates": attr.label(
             default = Label("@ros2_rosidl//:rosidl_generator_cpp_templates"),
         ),
-        "_interface_visibility_control_template": attr.label(
+        "_cpp_interface_visibility_control_template": attr.label(
             default = Label("@ros2_rosidl//:rosidl_generator_cpp/resource/rosidl_generator_cpp__visibility_control.hpp.in"),
             allow_single_file = True,
         ),
-        "_typesupport_generator": attr.label(
+        # Typesupport generator
+        "_cpp_typesupport_generator": attr.label(
             default = Label("@ros2_rosidl_typesupport//:rosidl_typesupport_generator_cpp_app"),
             executable = True,
             cfg = "exec",
         ),
-        "_typesupport_templates": attr.label(
+        "_cpp_typesupport_templates": attr.label(
             default = Label("@ros2_rosidl_typesupport//:rosidl_typesupport_generator_cpp_templates"),
         ),
-        "_typesupport_introspection_generator": attr.label(
+        # Typesupport introspection generator
+        "_cpp_typesupport_introspection_generator": attr.label(
             default = Label("@ros2_rosidl//:rosidl_typesupport_introspection_generator_cpp"),
             executable = True,
             cfg = "exec",
         ),
-        "_typesupport_introspection_templates": attr.label(
+        "_cpp_typesupport_introspection_templates": attr.label(
             default = Label("@ros2_rosidl//:rosidl_typesupport_introspection_generator_cpp_templates"),
         ),
-        "_cpp_copts": attr.string_list(
-            default = CPP_COPTS,
-        ),
+        # Compiler dependencies + runtime support libraries
         "_cpp_deps": attr.label_list(
             default = [
                 Label("@ros2_rosidl//:rosidl_runtime_cpp"),
@@ -743,89 +1116,92 @@ cpp_generator_aspect = aspect(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
         ),
     },
-    required_providers = [Ros2InterfaceInfo],
-    required_aspect_providers = [IdlAdapterAspectInfo],
-    provides = [CppGeneratorAspectInfo],
-    toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
-    fragments = ["cpp"],
 )
 
-def _cpp_ros2_interface_library_impl(ctx):
-    return _cc_generator_impl(ctx, CppGeneratorAspectInfo)
-
-cpp_ros2_interface_library = rule(
-    attrs = {
-        "deps": attr.label_list(
-            mandatory = True,
-            aspects = [idl_adapter_aspect, cpp_generator_aspect],
-            providers = [Ros2InterfaceInfo],
-        ),
-    },
-    implementation = _cpp_ros2_interface_library_impl,
-)
-
-PyGeneratorAspectInfo = provider("TBD", fields = [
-    "cc_info",
-    "dynamic_libraries",
-    "transitive_sources",
-    "imports",
-    "linker_inputs",
-])
-
-_INTERFACE_GENERATOR_PY_OUTPUT_MAPPING = [
-    "_%s.py",
-    "_%s_s.c",
-]
+### Python Generator ###
 
 def _get_py_srcs(files):
     return [f for f in files if f.path.endswith(".py")]
 
 def _py_generator_aspect_impl(target, ctx):
-    package_name = target.label.name
-    srcs = target[Ros2InterfaceInfo].info.srcs
-    adapter = target[IdlAdapterAspectInfo]
+    """
+    Generate Python code for a ROS2 interface library. This uses the generated C code as an extension module to provide
+    Python bindings.
 
-    type_support_impl = "rosidl_typesupport_c"
-    extra_generated_outputs = [
-        "_{}_s.ep.{}.c".format(package_name, type_support_impl),
+    Args:
+        target (Target): The target that the aspect is attached to.
+        ctx: The aspect context.
+    """
+
+    # Each package exports one ROS interface.
+    package_name = target.label.name
+    output_dir = "rosidl_generator_py/{}".format(package_name)
+    include_path = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name) + "rosidl_generator_py"
+
+    srcs = target[RosInterfaceInfo].srcs
+    adapter_info = target[IdlAdapterInfo]
+    type_description_info = target[TypeDescriptionInfo]
+
+    # Stage 1: Generate the Python files and compile the C extension module.
+
+    py_interface_templates = ctx.attr._py_interface_templates[DefaultInfo].files.to_list()
+
+    interface_inputs = []
+    interface_inputs.extend(srcs)
+    interface_inputs.extend(py_interface_templates)
+    interface_inputs.extend(adapter_info.direct_files)
+    interface_inputs.extend(type_description_info.direct_files)
+
+    interface_outputs = [
+        ctx.actions.declare_file("{}/_{}_s.ep.rosidl_typesupport_c.c".format(output_dir, package_name)),
     ]
 
     for ext in ["action", "msg", "srv"]:
         if any([f.extension == ext for f in srcs]):
-            extra_generated_outputs.append("{}/__init__.py".format(ext))
+            interface_outputs.append(
+                ctx.actions.declare_file("{}/{}/__init__.py".format(output_dir, ext)),
+            )
 
-    interface_outputs, cc_include_dir = run_generator(
+    interface_outputs.extend(_map_generator_outputs(
         ctx,
-        srcs,
-        package_name,
-        adapter.idl_tuples,
-        adapter.idl_files,
-        ctx.executable._py_interface_generator,
-        ctx.attr._py_interface_templates,
-        _INTERFACE_GENERATOR_PY_OUTPUT_MAPPING,
-        extra_generator_args = [
-            "--typesupport-impls={}".format(type_support_impl),
+        prefix = output_dir,
+        inputs = srcs,
+        output_templates = [
+            "{ext}/_{stem}.py",
+            "{ext}/_{stem}_s.c",
         ],
-        extra_generated_outputs = extra_generated_outputs,
-        mnemonic = "Ros2IdlGeneratorPy",
-        progress_message = "Generating Python IDL interfaces for %{label}",
+        snake_case = True,
+    ))
+
+    _run_generator(
+        ctx,
+        package_name = package_name,
+        tool = ctx.executable._py_interface_generator,
+        inputs = interface_inputs,
+        outputs = interface_outputs,
+        mnemonic = "RosPyInterface",
+        progress_message = "Generating Python interfaces for %{label}",
+        template_dir = _get_template_dir(py_interface_templates),
+        output_dir = output_dir,
+        idl_tuples = adapter_info.direct_tuples,
+        type_description_tuples = type_description_info.direct_tuples,
+        args = [
+            "--typesupport-impls=rosidl_typesupport_c",
+        ],
     )
 
-    all_outputs = interface_outputs
-
-    cc_srcs = _get_srcs(all_outputs)
-    py_extension_name = "{}_s__{}".format(package_name, type_support_impl)
-    compilation_info = _compile_cc_generated_code(
+    compilation_result = _compile_cc_generated_code(
         ctx,
         name = package_name + "_py",
-        aspect_info = CGeneratorAspectInfo,
-        srcs = cc_srcs,
+        srcs = _get_srcs(interface_outputs),
         hdrs = [],
-        deps = ctx.attr._py_ext_c_deps,
-        cc_include_dir = cc_include_dir,
-        copts = ctx.attr._py_ext_c_copts,
-        target = target,
+        deps = ctx.attr._py_ext_c_deps + ctx.rule.attr.deps + [target],
+        includes = [include_path],
+        conlyopts = C_COPTS,
+        providers = [CGeneratorInfo, PyGeneratorInfo],
     )
+
+    # Stage 2: Link the C extension module into a shared library so that it can be imported by Python.
 
     cc_toolchain = find_cpp_toolchain(ctx)
     feature_configuration = cc_common.configure_features(
@@ -835,36 +1211,40 @@ def _py_generator_aspect_impl(target, ctx):
         unsupported_features = ctx.disabled_features,
     )
 
-    # This one is needed because Python extensions are linked: if an IDL target
-    # B depends on an IDL target A, then the Python extension of B depends
-    # on the one of A.
-    linking_contexts = _get_linking_contexts_from_aspect_info_deps(
-        ctx.rule.attr.deps,
-        PyGeneratorAspectInfo,
-    )
-    dynamic_library_name_stem = package_name + "/" + py_extension_name
+    dynamic_library_name_stem = "{}/{}_s__rosidl_typesupport_c".format(output_dir, package_name)
+
+    # This one is needed because Python extensions are linked: if an IDL target B depends on an IDL target A, then the
+    # Python extension of B depends on the one of A.
+    dep_linking_contexts = [
+        dep[PyGeneratorInfo].cc_info.linking_context
+        for dep in ctx.rule.attr.deps
+    ]
+
     linking_outputs = cc_common.link(
         actions = ctx.actions,
         feature_configuration = feature_configuration,
         cc_toolchain = cc_toolchain,
-        compilation_outputs = compilation_info.compilation_outputs,
-        linking_contexts = [compilation_info.cc_info.linking_context] + linking_contexts,
+        compilation_outputs = compilation_result.compilation_outputs,
+        linking_contexts = [compilation_result.cc_info.linking_context] + dep_linking_contexts,
         name = dynamic_library_name_stem,
         output_type = "dynamic_library",
         # TODO(mvukov) More deps means larger libs. Try to set this to False.
         # link_deps_statically = True,  # Default is True!
     )
+
     library_to_link = linking_outputs.library_to_link
     dynamic_library = ctx.actions.declare_file(
-        dynamic_library_name_stem + ".so",
+        dynamic_library_name_stem + "." + library_to_link.resolved_symlink_dynamic_library.extension
     )
     ctx.actions.symlink(
         output = dynamic_library,
         target_file = library_to_link.resolved_symlink_dynamic_library,
     )
 
+    # The import path for this Python package. Apparently, this needs to be relative "workspace name" (the part after
+    # external/ for external repos, or the workspace name for the current repo).
     relative_path_parts = paths.relativize(
-        cc_include_dir,
+        include_path,
         ctx.bin_dir.path,
     ).split("/")
     if relative_path_parts[0] == "external":
@@ -875,43 +1255,47 @@ def _py_generator_aspect_impl(target, ctx):
             *relative_path_parts[0:]
         )
 
-    py_info = PyGeneratorAspectInfo(
-        cc_info = cc_common.merge_cc_infos(
-            direct_cc_infos = [compilation_info.cc_info] + [
-                dep[PyGeneratorAspectInfo].cc_info
-                for dep in ctx.rule.attr.deps
-            ],
-        ),
-        dynamic_libraries = depset(
-            direct = [dynamic_library],
-            transitive = [
-                dep[PyGeneratorAspectInfo].dynamic_libraries
-                for dep in ctx.rule.attr.deps
-            ],
-        ),
-        transitive_sources = depset(
-            direct = _get_py_srcs(all_outputs),
-            transitive = [
-                dep[PyGeneratorAspectInfo].transitive_sources
-                for dep in ctx.rule.attr.deps
-            ],
-        ),
-        imports = depset(
-            direct = [py_import_path],
-            transitive = [
-                dep[PyGeneratorAspectInfo].imports
-                for dep in ctx.rule.attr.deps
-            ],
-        ),
-        linker_inputs = compilation_info.cc_info.linking_context.linker_inputs,
-    )
     return [
-        py_info,
+        PyGeneratorInfo(
+            cc_info = cc_common.merge_cc_infos(
+                direct_cc_infos = [compilation_result.cc_info] + [
+                    dep[PyGeneratorInfo].cc_info
+                    for dep in ctx.rule.attr.deps
+                ],
+            ),
+            dynamic_libraries = depset(
+                direct = [dynamic_library],
+                transitive = [
+                    dep[PyGeneratorInfo].dynamic_libraries
+                    for dep in ctx.rule.attr.deps
+                ],
+            ),
+            transitive_sources = depset(
+                direct = _get_py_srcs(interface_outputs),
+                transitive = [
+                    dep[PyGeneratorInfo].transitive_sources
+                    for dep in ctx.rule.attr.deps
+                ],
+            ),
+            imports = depset(
+                direct = [py_import_path],
+                transitive = [
+                    dep[PyGeneratorInfo].imports
+                    for dep in ctx.rule.attr.deps
+                ],
+            ),
+            linker_inputs = compilation_result.cc_info.linking_context.linker_inputs,
+        ),
     ]
 
 py_generator_aspect = aspect(
     implementation = _py_generator_aspect_impl,
     attr_aspects = ["deps"],
+    required_providers = [RosInterfaceInfo],
+    required_aspect_providers = [[IdlAdapterInfo], [TypeDescriptionInfo], [CGeneratorInfo]],
+    provides = [PyGeneratorInfo],
+    toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
+    fragments = ["cpp"],
     attrs = {
         "_py_interface_generator": attr.label(
             default = Label("@ros2_rosidl_python//:rosidl_generator_py_app"),
@@ -921,11 +1305,9 @@ py_generator_aspect = aspect(
         "_py_interface_templates": attr.label(
             default = Label("@ros2_rosidl_python//:rosidl_generator_py_templates"),
         ),
-        "_py_ext_c_copts": attr.string_list(
-            default = C_COPTS,
-        ),
         "_py_ext_c_deps": attr.label_list(
             default = [
+                Label("@ros2_rosidl//:rosidl_runtime_c"),
                 Label("@rules_python//python/cc:current_py_cc_headers"),
                 Label("@com_github_mvukov_rules_ros2//ros2:rules_ros2_pip_deps_numpy_headers"),
             ],
@@ -935,18 +1317,20 @@ py_generator_aspect = aspect(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
         ),
     },
-    required_providers = [Ros2InterfaceInfo],
-    required_aspect_providers = [
-        [IdlAdapterAspectInfo],
-        [CGeneratorAspectInfo],
-    ],
-    provides = [PyGeneratorAspectInfo],
-    toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
-    fragments = ["cpp"],
 )
 
-def _merge_py_generator_aspect_infos(py_infos):
-    return PyGeneratorAspectInfo(
+def _merge_py_generator_infos(py_infos):
+    """
+    Merge multiple PyGeneratorInfo instances into a single one.
+
+    Args:
+        py_infos (list[PyGeneratorInfo]): The PyGeneratorInfo instances to merge.
+    Returns:
+        PyGeneratorInfo: The merged PyGeneratorInfo instance.
+    """
+
+    return PyGeneratorInfo(
+        # cc_info not needed because all the modules have been compiled already.
         dynamic_libraries = depset(
             transitive = [info.dynamic_libraries for info in py_infos],
         ),
@@ -957,60 +1341,142 @@ def _merge_py_generator_aspect_infos(py_infos):
         linker_inputs = depset(transitive = [info.linker_inputs for info in py_infos]),
     )
 
-def _py_generator_impl(ctx):
-    py_info = _merge_py_generator_aspect_infos([
-        dep[PyGeneratorAspectInfo]
+def _py_generator_rule_impl(ctx):
+    merged_info = _merge_py_generator_infos([
+        dep[PyGeneratorInfo]
         for dep in ctx.attr.deps
     ])
 
     linked_dynamic_libraries = []
-    for linker_input in py_info.linker_inputs.to_list():
+    for linker_input in merged_info.linker_inputs.to_list():
         for library in linker_input.libraries:
             if library.pic_static_library == None and library.dynamic_library != None:
                 # The sole purpose of this shenanigan is to fetch @ros2_rosidl//:rosidl_typesupport_introspection_c_identifier.
                 # For that target we know it only has a dynamic library.
                 linked_dynamic_libraries.append(library.dynamic_library)
 
-    type_desc_deps = []
-    for dep in ctx.attr.deps:
-        for out in dep[Ros2InterfaceInfo].type_description_outputs:
-            type_desc_deps.append(out)
-
     return [
-        DefaultInfo(runfiles = ctx.runfiles(
+        DefaultInfo(
+            files = depset(
+                transitive = [
+                    merged_info.dynamic_libraries,
+                    merged_info.transitive_sources,
+                ],
+            ),
+            runfiles = ctx.runfiles(
             transitive_files = depset(
                 transitive = [
-                    py_info.transitive_sources,
-                    py_info.dynamic_libraries,
+                    merged_info.transitive_sources,
+                    merged_info.dynamic_libraries,
                     depset(linked_dynamic_libraries),
                 ],
             ),
-            files = type_desc_deps,
         )),
         PyInfo(
-            transitive_sources = py_info.transitive_sources,
-            imports = py_info.imports,
+            transitive_sources = merged_info.transitive_sources,
+            imports = merged_info.imports,
         ),
     ]
 
-py_generator = rule(
+py_generator_rule = rule(
+    implementation = _py_generator_rule_impl,
     attrs = {
         "deps": attr.label_list(
             mandatory = True,
             aspects = [
                 idl_adapter_aspect,
+                type_description_aspect,
                 c_generator_aspect,
                 py_generator_aspect,
             ],
-            providers = [Ros2InterfaceInfo],
+            providers = [RosInterfaceInfo],
         ),
     },
-    implementation = _py_generator_impl,
 )
 
-def py_ros2_interface_library(name, deps, **kwargs):
+### Rule + macro definitions ###
+
+def _ros2_interface_library_rule_impl(ctx):
+    dep_srcs = []
+    for dep in ctx.attr.deps:
+        dep_srcs.extend(dep[RosInterfaceInfo].srcs)
+
+    return [
+        DefaultInfo(files = depset(ctx.files.srcs)),
+        RosInterfaceInfo(
+            srcs = ctx.files.srcs,
+            deps = depset(
+                direct = dep_srcs,
+                transitive = [dep[RosInterfaceInfo].deps for dep in ctx.attr.deps],
+            ),
+        ),
+    ]
+
+ros2_interface_library_rule = rule(
+    implementation = _ros2_interface_library_rule_impl,
+    provides = [RosInterfaceInfo],
+    attrs = {
+        "srcs": attr.label_list(
+            allow_files = [".action", ".msg", ".srv"],
+            mandatory = True,
+        ),
+        "deps": attr.label_list(
+            providers = [RosInterfaceInfo],
+            aspects = [idl_adapter_aspect, type_description_aspect],
+        ),
+    },
+)
+
+def _ros2_c_interface_library_impl(ctx):
+    return [
+        cc_common.merge_cc_infos(
+            direct_cc_infos = [dep[CGeneratorInfo].cc_info for dep in ctx.attr.deps],
+        )
+    ]
+
+ros2_c_interface_library = rule(
+    implementation = _ros2_c_interface_library_impl,
+    provides = [CcInfo],
+    attrs = {
+        "deps": attr.label_list(
+            mandatory = True,
+            providers = [RosInterfaceInfo],
+            aspects = [
+                idl_adapter_aspect,
+                type_description_aspect,
+                c_generator_aspect,
+            ],
+        ),
+    },
+)
+
+def _ros2_cpp_interface_library_impl(ctx):
+    return [
+        cc_common.merge_cc_infos(
+            direct_cc_infos = [dep[CppGeneratorInfo].cc_info for dep in ctx.attr.deps],
+        )
+    ]
+
+ros2_cpp_interface_library = rule(
+    implementation = _ros2_cpp_interface_library_impl,
+    provides = [CcInfo],
+    attrs = {
+        "deps": attr.label_list(
+            mandatory = True,
+            providers = [RosInterfaceInfo],
+            aspects = [
+                idl_adapter_aspect,
+                type_description_aspect,
+                c_generator_aspect,
+                cpp_generator_aspect,
+            ],
+        ),
+    },
+)
+
+def ros2_py_interface_library(name, deps, **kwargs):
     name_py = name + "_py_generator"
-    py_generator(
+    py_generator_rule(
         name = name_py,
         deps = deps,
         **kwargs
@@ -1019,8 +1485,67 @@ def py_ros2_interface_library(name, deps, **kwargs):
         name = name,
         deps = [
             name_py,
+            Label("@ros2_rosidl_python//:rosidl_generator_py_lib"),
             Label("@ros2_rosidl//:rosidl_parser"),
             requirement("numpy"),
         ],
         **kwargs
     )
+
+def ros2_interface_library(
+    *,
+    name,
+    srcs,
+    deps = [],
+    c_library = True,
+    cpp_library = True,
+    py_library = True,
+    **kwargs,
+):
+    """
+    Define a ROS2 interface library and generate code for it on demand.
+
+    The following targets will be generated:
+    - {name}: The main ROS2 interface target. Put this in the deps of other interface targets.
+    - c_{name}: The C library generated from the ROS2 interface.
+    - cpp_{name}: The C++ library generated from the ROS2 interface.
+    - py_{name}: The Python library generated from the ROS2 interface.
+
+    Args:
+        name (str): The name of the target.
+        srcs (list[Label]): The source files for the ROS interface. These can be .action, .msg, or .srv files.
+        deps (list[Label]): The dependencies of the ROS interface. These should be other ROS interfaces that this
+            interface depends on.
+        c_library (bool): Whether to generate a C library for the interface. Default is True.
+        cpp_library (bool): Whether to generate a C++ library for the interface. Default is True.
+        py_library (bool): Whether to generate a Python library for the interface. Default is True.
+        kwargs: Additional arguments to pass to the rules.
+    """
+
+    ros2_interface_library_rule(
+        name = name,
+        srcs = srcs,
+        deps = deps,
+        **kwargs,
+    )
+
+    if c_library:
+        ros2_c_interface_library(
+            name = "c_" + name,
+            deps = [":" + name],
+            **kwargs,
+        )
+
+    if cpp_library:
+        ros2_cpp_interface_library(
+            name = "cpp_" + name,
+            deps = [":" + name],
+            **kwargs,
+        )
+
+    if py_library:
+        ros2_py_interface_library(
+            name = "py_" + name,
+            deps = [":" + name],
+            **kwargs,
+        )

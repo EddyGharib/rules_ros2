@@ -5,15 +5,15 @@ load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load(
     "@com_github_mvukov_rules_ros2//ros2:interfaces.bzl",
-    "Ros2InterfaceInfo",
+    "RosInterfaceInfo",
     "cpp_generator_aspect",
     "idl_adapter_aspect",
 )
 load(
     "@com_github_mvukov_rules_ros2//ros2:plugin_aspects.bzl",
-    "Ros2IdlPluginAspectInfo",
-    "Ros2InterfaceCollectorAspectInfo",
-    "Ros2PluginCollectorAspectInfo",
+    "RosIdlPluginInfo",
+    "RosInterfaceCollectorInfo",
+    "RosPluginCollectorInfo",
     "create_interface_struct",
     "ros2_idl_plugin_aspect",
     "ros2_interface_collector_aspect",
@@ -101,7 +101,7 @@ def _write_plugins_xml(
 def _get_package_name(class_name):
     return class_name.split("::")[0]
 
-Ros2AmentSetupInfo = provider(
+RosAmentSetupInfo = provider(
     "TBD",
     fields = [
         "ament_prefix_path",
@@ -111,7 +111,7 @@ Ros2AmentSetupInfo = provider(
 def _ros2_ament_setup_rule_impl(ctx):
     plugins = depset(
         transitive = [
-            dep[Ros2PluginCollectorAspectInfo].plugins
+            dep[RosPluginCollectorInfo].plugins
             for dep in ctx.attr.deps
         ],
     ).to_list()
@@ -159,7 +159,7 @@ def _ros2_ament_setup_rule_impl(ctx):
 
     idl_plugins = depset(
         transitive = [
-            dep[Ros2IdlPluginAspectInfo].plugins
+            dep[RosIdlPluginInfo].plugins
             for dep in ctx.attr.idl_deps
         ],
     ).to_list()
@@ -181,7 +181,7 @@ def _ros2_ament_setup_rule_impl(ctx):
 
     idls_from_deps = depset(
         transitive = [
-            dep[Ros2InterfaceCollectorAspectInfo].interfaces
+            dep[RosInterfaceCollectorInfo].interfaces
             for dep in ctx.attr.deps
         ],
     )
@@ -230,7 +230,7 @@ def _ros2_ament_setup_rule_impl(ctx):
             files = outputs_depset,
             runfiles = ctx.runfiles(transitive_files = outputs_depset),
         ),
-        Ros2AmentSetupInfo(
+        RosAmentSetupInfo(
             ament_prefix_path = ament_prefix_path,
         ),
     ]
@@ -250,7 +250,7 @@ ros2_ament_setup = rule(
                 cpp_generator_aspect,
                 ros2_idl_plugin_aspect,
             ],
-            providers = [Ros2InterfaceInfo],
+            providers = [RosInterfaceInfo],
         ),
     },
     implementation = _ros2_ament_setup_rule_impl,
@@ -264,7 +264,7 @@ def py_create_ament_setup(ament_prefix_path):
 
 def _py_launcher_rule_impl(ctx):
     output = ctx.actions.declare_file(ctx.attr.name + ".py")
-    ament_prefix_path = ctx.attr.ament_setup[Ros2AmentSetupInfo].ament_prefix_path
+    ament_prefix_path = ctx.attr.ament_setup[RosAmentSetupInfo].ament_prefix_path
 
     substitutions = dicts.add(
         ctx.attr.substitutions,
@@ -298,7 +298,7 @@ py_launcher_rule = rule(
     attrs = {
         "ament_setup": attr.label(
             mandatory = True,
-            providers = [Ros2AmentSetupInfo],
+            providers = [RosAmentSetupInfo],
         ),
         "data": attr.label_list(allow_files = True),
         "substitutions": attr.string_dict(mandatory = True),
@@ -337,7 +337,7 @@ SH_TOOLCHAIN = "@bazel_tools//tools/sh:toolchain_type"
 
 def _sh_launcher_rule_impl(ctx):
     output = ctx.actions.declare_file(ctx.attr.name)
-    ament_prefix_path = ctx.attr.ament_setup[Ros2AmentSetupInfo].ament_prefix_path or ""
+    ament_prefix_path = ctx.attr.ament_setup[RosAmentSetupInfo].ament_prefix_path or ""
 
     substitutions = dicts.add(
         ctx.attr.substitutions,
@@ -369,7 +369,7 @@ sh_launcher_rule = rule(
     attrs = {
         "ament_setup": attr.label(
             mandatory = True,
-            providers = [Ros2AmentSetupInfo],
+            providers = [RosAmentSetupInfo],
         ),
         "data": attr.label_list(allow_files = True),
         "substitutions": attr.string_dict(mandatory = True),
@@ -402,7 +402,7 @@ def _cpp_ament_setup_impl(ctx):
     basename = ctx.attr.basename or ctx.label.name
     src_output = ctx.actions.declare_file(basename + "/ament_setup.cc")
     hdr_output = ctx.actions.declare_file(basename + "/ament_setup.h")
-    ament_prefix_path = ctx.attr.ament_setup[Ros2AmentSetupInfo].ament_prefix_path
+    ament_prefix_path = ctx.attr.ament_setup[RosAmentSetupInfo].ament_prefix_path
 
     substitutions = {
         "{{ament_prefix_path}}": ament_prefix_path,
@@ -436,7 +436,7 @@ cpp_ament_setup = rule(
     attrs = {
         "ament_setup": attr.label(
             mandatory = True,
-            providers = [Ros2AmentSetupInfo],
+            providers = [RosAmentSetupInfo],
         ),
         "basename": attr.string(
             default = "",

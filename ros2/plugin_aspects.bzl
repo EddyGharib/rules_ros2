@@ -16,13 +16,13 @@
 
 load(
     "@com_github_mvukov_rules_ros2//ros2:interfaces.bzl",
-    "CppGeneratorAspectInfo",
-    "IdlAdapterAspectInfo",
-    "Ros2InterfaceInfo",
+    "CppGeneratorInfo",
+    "IdlAdapterInfo",
+    "RosInterfaceInfo",
 )
 load("@rules_cc//cc:toolchain_utils.bzl", "find_cpp_toolchain")
 
-Ros2PluginInfo = provider(
+RosPluginInfo = provider(
     "Provides necessary info for plugin routing.",
     fields = [
         "target_name",
@@ -31,7 +31,7 @@ Ros2PluginInfo = provider(
     ],
 )
 
-Ros2PluginCollectorAspectInfo = provider(
+RosPluginCollectorInfo = provider(
     "Provides info about collected plugins.",
     fields = [
         "plugins",
@@ -65,16 +65,16 @@ def _get_transitive_items(ctx, aspect_name, item_name):
 def _ros2_plugin_collector_aspect_impl(target, ctx):
     direct_plugins = []
     if ctx.rule.kind == "ros2_plugin_rule":
-        direct_plugins.append(target[Ros2PluginInfo])
+        direct_plugins.append(target[RosPluginInfo])
 
     transitive_plugins = _get_transitive_items(
         ctx,
-        Ros2PluginCollectorAspectInfo,
+        RosPluginCollectorInfo,
         "plugins",
     )
 
     return [
-        Ros2PluginCollectorAspectInfo(
+        RosPluginCollectorInfo(
             plugins = depset(
                 direct = direct_plugins,
                 transitive = transitive_plugins,
@@ -85,10 +85,10 @@ def _ros2_plugin_collector_aspect_impl(target, ctx):
 ros2_plugin_collector_aspect = aspect(
     implementation = _ros2_plugin_collector_aspect_impl,
     attr_aspects = _ROS2_COLLECTOR_ATTR_ASPECTS,
-    provides = [Ros2PluginCollectorAspectInfo],
+    provides = [RosPluginCollectorInfo],
 )
 
-Ros2InterfaceCollectorAspectInfo = provider(
+RosInterfaceCollectorInfo = provider(
     "Provides info about collected interfaces.",
     fields = [
         "interfaces",
@@ -98,7 +98,7 @@ Ros2InterfaceCollectorAspectInfo = provider(
 def create_interface_struct(target):
     return struct(
         package_name = target.label.name,
-        srcs = target[Ros2InterfaceInfo].info.srcs,
+        srcs = target[RosInterfaceInfo].srcs,
     )
 
 def _ros2_interface_collector_aspect_impl(target, ctx):
@@ -108,12 +108,12 @@ def _ros2_interface_collector_aspect_impl(target, ctx):
 
     transitive_interfaces = _get_transitive_items(
         ctx,
-        Ros2InterfaceCollectorAspectInfo,
+        RosInterfaceCollectorInfo,
         "interfaces",
     )
 
     return [
-        Ros2InterfaceCollectorAspectInfo(
+        RosInterfaceCollectorInfo(
             interfaces = depset(
                 direct = direct_interfaces,
                 transitive = transitive_interfaces,
@@ -124,10 +124,10 @@ def _ros2_interface_collector_aspect_impl(target, ctx):
 ros2_interface_collector_aspect = aspect(
     implementation = _ros2_interface_collector_aspect_impl,
     attr_aspects = _ROS2_COLLECTOR_ATTR_ASPECTS,
-    provides = [Ros2InterfaceCollectorAspectInfo],
+    provides = [RosInterfaceCollectorInfo],
 )
 
-Ros2IdlPluginAspectInfo = provider(
+RosIdlPluginInfo = provider(
     "Provides info for generated IDL plugins.",
     fields = [
         "plugins",
@@ -155,11 +155,11 @@ def create_dynamic_library(ctx, **kwargs):
 
 def _ros2_idl_plugin_aspect_impl(target, ctx):
     package_name = target.label.name
-    cc_info = target[CppGeneratorAspectInfo].cc_info
+    cc_info = target[CppGeneratorInfo].cc_info
     dynamic_library = create_dynamic_library(
         ctx,
         name = package_name + "/plugin",
-        compilation_outputs = target[CppGeneratorAspectInfo].compilation_outputs,
+        compilation_outputs = target[CppGeneratorInfo].compilation_outputs,
         linking_contexts = [cc_info.linking_context],
     )
     plugin = struct(
@@ -168,11 +168,11 @@ def _ros2_idl_plugin_aspect_impl(target, ctx):
     )
 
     return [
-        Ros2IdlPluginAspectInfo(
+        RosIdlPluginInfo(
             plugins = depset(
                 direct = [plugin],
                 transitive = [
-                    dep[Ros2IdlPluginAspectInfo].plugins
+                    dep[RosIdlPluginInfo].plugins
                     for dep in ctx.rule.attr.deps
                 ],
             ),
@@ -187,12 +187,12 @@ ros2_idl_plugin_aspect = aspect(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
         ),
     },
-    required_providers = [Ros2InterfaceInfo],
+    required_providers = [RosInterfaceInfo],
     required_aspect_providers = [
-        [IdlAdapterAspectInfo],
-        [CppGeneratorAspectInfo],
+        [IdlAdapterInfo],
+        [CppGeneratorInfo],
     ],
-    provides = [Ros2IdlPluginAspectInfo],
+    provides = [RosIdlPluginInfo],
     toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
     fragments = ["cpp"],
 )
