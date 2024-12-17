@@ -530,6 +530,20 @@ def _bindir_repository_dir(repo_name):
     return "external/{}/".format(repo_name) if repo_name else ""
 
 
+def _package_dir(package):
+    """
+    Return the relative directory for the given package.
+
+    Args:
+        package (str): The name of the package.
+    Returns:
+        str: The empty string if the package name is empty, otherwise
+            '<package>/'.
+    """
+
+    return package + "/" if package else ""
+
+
 def _type_description_aspect_impl(target, ctx):
     """
     Generate type support files for a ROS2 IDL file.
@@ -602,7 +616,7 @@ def _type_description_aspect_impl(target, ctx):
         # The outputs will be in the form of "bazel-out/<config>/<repo_name>?/<package_name>/rosidl_generator_type_description/<file_path>".
         # We want to map the <file_path> segment to the full path of the file, replacing the .json extension
         # with .idl.
-        prefix = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name) + "rosidl_generator_type_description/" + package_name + "/"
+        prefix = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name) + _package_dir(target.label.package) + "rosidl_generator_type_description/" + package_name + "/"
         if not output.path.startswith(prefix):
             fail("Expected type description output to start with '{}', got '{}'".format(prefix, output.path))
 
@@ -814,7 +828,7 @@ def _c_generator_aspect_impl(target, ctx):
     ]
 
 
-    include_base = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name)
+    include_base = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name) + _package_dir(target.label.package)
     include_paths = [
         include_base + "rosidl_generator_c",
         include_base + "rosidl_typesupport_c",
@@ -1057,7 +1071,7 @@ def _cpp_generator_aspect_impl(target, ctx):
         interface_visibility_control,
     ]
 
-    include_base = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name)
+    include_base = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name) + _package_dir(target.label.package)
     include_paths = [
         include_base + "rosidl_generator_cpp",
         include_base + "rosidl_typesupport_cpp",
@@ -1156,7 +1170,7 @@ def _py_generator_aspect_impl(target, ctx):
     # Each package exports one ROS interface.
     package_name = target.label.name
     output_dir = "rosidl_generator_py/{}".format(package_name)
-    include_path = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name) + "rosidl_generator_py"
+    include_path = ctx.bin_dir.path + "/" + _bindir_repository_dir(target.label.repo_name) + _package_dir(target.label.package) + "rosidl_generator_py"
 
     srcs = target[RosInterfaceInfo].srcs
     adapter_info = target[IdlAdapterInfo]
