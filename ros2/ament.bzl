@@ -8,6 +8,7 @@ load(
     "RosInterfaceInfo",
     "cpp_generator_aspect",
     "idl_adapter_aspect",
+    "type_description_aspect",
 )
 load(
     "@com_github_mvukov_rules_ros2//ros2:plugin_aspects.bzl",
@@ -247,6 +248,7 @@ ros2_ament_setup = rule(
         "idl_deps": attr.label_list(
             aspects = [
                 idl_adapter_aspect,
+                type_description_aspect,
                 cpp_generator_aspect,
                 ros2_idl_plugin_aspect,
             ],

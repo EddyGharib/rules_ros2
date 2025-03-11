@@ -372,6 +372,7 @@ CppGeneratorInfo = provider(
     doc = "Information about the generated C++ code for a ROS2 interface.",
     fields = {
         "cc_info": "The compilation information for the generated C++ code.",
+        "compilation_outputs": "The compilation output files of the generator",
     },
 )
 
@@ -1055,6 +1056,7 @@ def _cpp_generator_aspect_impl(target, ctx):
     return [
         CppGeneratorInfo(
             cc_info = compilation_info.cc_info,
+            compilation_outputs = compilation_info.compilation_outputs,
         ),
     ]
 
