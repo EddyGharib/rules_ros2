@@ -1,6 +1,6 @@
 module(
     name = "com_github_mvukov_rules_ros2",
-    version = "2.0.0.eddy.2",
+    version = "2.0.0.eddy.3",
 )
 
 bazel_dep(name = "asio", version = "1.31.0")
@@ -16,8 +16,8 @@ bazel_dep(name = "platforms", version = "0.0.10")
 bazel_dep(name = "pybind11_bazel", version = "2.13.6")
 bazel_dep(name = "re2", version = "2024-07-02")  # this is only here to force graph to resolve to higher res2 version compatible with pybind11_bazel above. Remove once no longer needed.
 bazel_dep(name = "rules_cc", version = "0.1.0")
-bazel_dep(name = "rules_foreign_cc", version = "0.11.1")
-bazel_dep(name = "rules_python", version = "1.0.0-rc0")
+bazel_dep(name = "rules_foreign_cc", version = "0.14.0")
+bazel_dep(name = "rules_python", version = "1.2.0")
 
 # bazel_dep(name = "rules_rust", version = "0.49.3")
 bazel_dep(name = "spdlog", version = "1.14.1")
@@ -65,14 +65,14 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(
     is_default = True,
-    python_version = "3.10",
+    python_version = "3.12",
 )
 use_repo(python, rules_ros2_pythons = "python_versions")
 
 pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
 pip.parse(
     hub_name = "rules_ros2_pip_deps",
-    python_version = "3.10",
+    python_version = "3.12",
     requirements_lock = "//:requirements_lock.txt",
 )
 use_repo(pip, "rules_ros2_pip_deps")
@@ -80,7 +80,7 @@ use_repo(pip, "rules_ros2_pip_deps")
 dev_pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip", dev_dependency = True)
 dev_pip.parse(
     hub_name = "rules_ros2_resolver_deps",
-    python_version = "3.10",
+    python_version = "3.12",
     requirements_lock = "//repositories/private:resolver_requirements_lock.txt",
 )
 use_repo(dev_pip, "rules_ros2_resolver_deps")

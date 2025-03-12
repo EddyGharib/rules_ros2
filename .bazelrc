@@ -46,3 +46,6 @@ build:clang --linkopt="-fuse-ld=lld"
 # as the user configuration should be able to overwrite flags from this file.
 # See https://docs.bazel.build/versions/master/best-practices.html#bazelrc
 try-import %workspace%/user.bazelrc
+
+common --registry=https://raw.githubusercontent.com/idealworks/bazel-public-registry/master
+common --registry=https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main
