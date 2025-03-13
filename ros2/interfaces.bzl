@@ -1253,6 +1253,14 @@ def _py_generator_aspect_impl(target, ctx):
             *relative_path_parts[0:]
         )
 
+    transitive_imports = []
+    transitive_transitive_sources = []
+
+    # Import paths and files of any dependencies.
+    for dep in ctx.attr._py_runtime_deps:
+        transitive_imports.append(dep[PyInfo].imports)
+        transitive_transitive_sources.append(dep[PyInfo].transitive_sources)
+
     return [
         PyGeneratorInfo(
             cc_info = cc_common.merge_cc_infos(
@@ -1273,14 +1281,14 @@ def _py_generator_aspect_impl(target, ctx):
                 transitive = [
                     dep[PyGeneratorInfo].transitive_sources
                     for dep in ctx.rule.attr.deps
-                ],
+                ] + transitive_transitive_sources,
             ),
             imports = depset(
                 direct = [py_import_path],
                 transitive = [
                     dep[PyGeneratorInfo].imports
                     for dep in ctx.rule.attr.deps
-                ],
+                ] + transitive_imports,
             ),
             linker_inputs = compilation_result.cc_info.linking_context.linker_inputs,
         ),
@@ -1307,9 +1315,15 @@ py_generator_aspect = aspect(
             default = [
                 Label("@ros2_rosidl//:rosidl_runtime_c"),
                 Label("@rules_python//python/cc:current_py_cc_headers"),
-                Label("@com_github_mvukov_rules_ros2//ros2:rules_ros2_pip_deps_numpy_headers"),
+                Label("@rules_ros2_pip_deps//numpy:numpy_lib"),
             ],
             providers = [CcInfo],
+        ),
+        "_py_runtime_deps": attr.label_list(
+            default = [
+                Label("@rules_ros2_pip_deps//numpy"),
+            ],
+            providers = [PyInfo],
         ),
         "_cc_toolchain": attr.label(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
@@ -1374,6 +1388,7 @@ def _py_generator_rule_impl(ctx):
         PyInfo(
             transitive_sources = merged_info.transitive_sources,
             imports = merged_info.imports,
+            uses_shared_libraries = True,
         ),
     ]
 

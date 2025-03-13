@@ -1,6 +1,6 @@
 module(
     name = "com_github_mvukov_rules_ros2",
-    version = "2.0.0.eddy.3",
+    version = "2.0.0.eddy.4",
 )
 
 bazel_dep(name = "asio", version = "1.31.0")
@@ -70,10 +70,35 @@ python.toolchain(
 use_repo(python, rules_ros2_pythons = "python_versions")
 
 pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+
+# Include numpy headers, which is unconditionally required by all
+# ros2_py_interface_library targets.
+ADDITIVE_BUILD_CONTENT_NUMPY = """\
+cc_library(
+    name = "numpy_lib",
+    hdrs = glob(["site-packages/numpy/_core/include/numpy/**/*.h"]),
+    includes = ["site-packages/numpy/_core/include/"],
+    visibility = ["//visibility:public"],
+)
+"""
+
+pip.whl_mods(
+    additive_build_content = ADDITIVE_BUILD_CONTENT_NUMPY,
+    data = [":numpy_lib"],
+    hub_name = "whl_mods_hub",
+    whl_name = "numpy",
+)
+use_repo(pip, "whl_mods_hub")
 pip.parse(
+    extra_hub_aliases = {
+        "numpy": ["numpy_lib"],
+    },
     hub_name = "rules_ros2_pip_deps",
     python_version = "3.12",
     requirements_lock = "//:requirements_lock.txt",
+    whl_modifications = {
+        "@whl_mods_hub//:numpy.json": "numpy",
+    },
 )
 use_repo(pip, "rules_ros2_pip_deps")
 
