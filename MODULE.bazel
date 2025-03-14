@@ -1,6 +1,6 @@
 module(
     name = "com_github_mvukov_rules_ros2",
-    version = "2.0.0.eddy.4",
+    version = "2.0.0.eddy.5",
 )
 
 bazel_dep(name = "asio", version = "1.31.0")
@@ -93,14 +93,33 @@ pip.parse(
     extra_hub_aliases = {
         "numpy": ["numpy_lib"],
     },
-    hub_name = "rules_ros2_pip_deps",
+    hub_name = "rules_ros2_pip_deps_x86_64",
     python_version = "3.12",
     requirements_lock = "//:requirements_lock.txt",
     whl_modifications = {
         "@whl_mods_hub//:numpy.json": "numpy",
     },
 )
-use_repo(pip, "rules_ros2_pip_deps")
+pip.parse(
+    download_only = True,
+    extra_hub_aliases = {
+        "numpy": ["numpy_lib"],
+    },
+    extra_pip_args = [
+        "--platform",
+        "linux_x86_64",
+        "--platform",
+        "manylinux2014_aarch64",
+    ],
+    hub_name = "rules_ros2_pip_deps_aarch64",
+    python_version = "3.12",
+    requirements_lock = "//:requirements_lock.txt",
+    whl_modifications = {
+        "@whl_mods_hub//:numpy.json": "numpy",
+    },
+)
+use_repo(pip, "rules_ros2_pip_deps_x86_64")
+use_repo(pip, "rules_ros2_pip_deps_aarch64")
 
 dev_pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip", dev_dependency = True)
 dev_pip.parse(

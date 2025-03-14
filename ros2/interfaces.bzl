@@ -17,7 +17,6 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@rules_cc//cc:toolchain_utils.bzl", "find_cpp_toolchain")
 load("@rules_python//python:defs.bzl", "py_library")
-load("@rules_ros2_pip_deps//:requirements.bzl", "requirement")
 load(":cc_opts.bzl", "CPP_COPTS", "C_COPTS")
 
 ### Utility functions ###
@@ -1315,13 +1314,13 @@ py_generator_aspect = aspect(
             default = [
                 Label("@ros2_rosidl//:rosidl_runtime_c"),
                 Label("@rules_python//python/cc:current_py_cc_headers"),
-                Label("@rules_ros2_pip_deps//numpy:numpy_lib"),
+                Label("//:numpy_lib"),
             ],
             providers = [CcInfo],
         ),
         "_py_runtime_deps": attr.label_list(
             default = [
-                Label("@rules_ros2_pip_deps//numpy"),
+                Label("//:numpy"),
             ],
             providers = [PyInfo],
         ),
@@ -1501,7 +1500,7 @@ def ros2_py_interface_library(name, deps, **kwargs):
             name_py,
             Label("@ros2_rosidl_python//:rosidl_generator_py_lib"),
             Label("@ros2_rosidl//:rosidl_parser"),
-            requirement("numpy"),
+            Label("//:numpy"),
         ],
         **kwargs
     )
