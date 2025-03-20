@@ -26,6 +26,7 @@ def ros2_launch(name, launch_file, nodes = None, deps = None, data = None, idl_d
         template = "@com_github_mvukov_rules_ros2//ros2:launch.py.tpl",
         substitutions = {
             "{launch_file}": "$(rootpath {})".format(launch_file),
+            "{rule_name}": name,
         },
         data = [launch_file],
         tags = ["manual"],
