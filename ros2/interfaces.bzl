@@ -181,7 +181,7 @@ def _run_generator(
         # to worry about it.
         target_dependencies = [],
     )
-    ctx.actions.write(generator_arguments_file, generator_arguments.to_json())
+    ctx.actions.write(generator_arguments_file, json.encode(generator_arguments))
 
     tool_arguments = ctx.actions.args()
     tool_arguments.add(generator_arguments_file, format = "--generator-arguments-file=%s")
@@ -439,7 +439,7 @@ def _idl_adapter_aspect_impl(target, ctx):
         non_idl_tuples = non_idl_tuples,
     )
     adapter_arguments_file = ctx.actions.declare_file("{}/rosidl_adapter_arguments.json".format(output_dir))
-    ctx.actions.write(adapter_arguments_file, adapter_arguments.to_json())
+    ctx.actions.write(adapter_arguments_file, json.encode(adapter_arguments))
 
     cmd_arguments = ctx.actions.args()
     cmd_arguments.add(package_name, format = "--package-name=%s")
