@@ -41,6 +41,7 @@ def main() -> None:
         os.environ['ROS_HOME'] = bazel_test_output_dir
     if 'ROS_LOG_DIR' not in os.environ:
         os.environ['ROS_LOG_DIR'] = bazel_test_output_dir
+        os.environ['ROS_LOG_SKIP_LATEST_SYMLINK'] = '1'
 
     with contextlib.ExitStack() as stack:
         if 'ROS_DOMAIN_ID' not in os.environ:
