@@ -15,6 +15,7 @@
 "Rules and aspects for working with ROS2 interfaces."
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_cc//cc:toolchain_utils.bzl", "find_cpp_toolchain")
 load("@rules_python//python:defs.bzl", "py_library")
 load(":cc_opts.bzl", "CPP_COPTS", "C_COPTS")
@@ -640,6 +641,7 @@ def _c_generator_aspect_impl(target, ctx):
     srcs = target[RosInterfaceInfo].srcs
     adapter_info = target[IdlAdapterInfo]
     type_description_info = target[TypeDescriptionInfo]
+    use_zenoh = ctx.attr._rmw[BuildSettingInfo].value == "zenoh"
 
     interface_templates = ctx.attr._c_interface_templates[DefaultInfo].files.to_list()
 
@@ -728,8 +730,8 @@ def _c_generator_aspect_impl(target, ctx):
         ),
         outputs = typesupport_outputs,
         args = [
-            # TODO(mvukov) There are also rosidl_typesupport_connext_c and rosidl_typesupport_fastrtps_c.
-            "--typesupports=rosidl_typesupport_introspection_c",
+            "--typesupports",
+            "rosidl_typesupport_fastrtps_c" if use_zenoh else "rosidl_typesupport_introspection_c",
         ],
         mnemonic = "RosCTypeSupport",
         progress_message = "Generating C type support for %{label}",
@@ -785,9 +787,47 @@ def _c_generator_aspect_impl(target, ctx):
         template = ctx.file._c_typesupport_introspection_visibility_control_template,
     )
 
+    # Stage 3b: Generate the C fastrtps typesupport files (only for rmw_zenoh).
+    typesupport_fastrtps_outputs = []
+    if use_zenoh:
+        typesupport_fastrtps_templates = ctx.attr._c_typesupport_fastrtps_templates[DefaultInfo].files.to_list()
+        typesupport_fastrtps_output_dir = "rosidl_typesupport_fastrtps_c/{}".format(package_name)
+        typesupport_fastrtps_generated = _map_generator_outputs(
+            ctx,
+            prefix = typesupport_fastrtps_output_dir,
+            inputs = srcs,
+            output_templates = [
+                "{ext}/detail/{stem}__rosidl_typesupport_fastrtps_c.h",
+                "{ext}/detail/{stem}__type_support_c.cpp",
+            ],
+            snake_case = True,
+        )
+        _run_generator(
+            ctx,
+            package_name = package_name,
+            tool = ctx.executable._c_typesupport_fastrtps_generator,
+            inputs = depset(
+                direct = srcs + typesupport_fastrtps_templates,
+                transitive = [adapter_info.files],
+            ),
+            outputs = typesupport_fastrtps_generated,
+            mnemonic = "RosCTypeSupportFastrtps",
+            progress_message = "Generating C fastrtps type support for %{label}",
+            template_dir = _get_template_dir(typesupport_fastrtps_templates),
+            output_dir = typesupport_fastrtps_output_dir,
+            idl_tuples = adapter_info.tuples,
+        )
+        typesupport_fastrtps_visibility_control = _generate_visibility_control(
+            ctx,
+            prefix = typesupport_fastrtps_output_dir,
+            package_name = package_name,
+            template = ctx.file._c_typesupport_fastrtps_visibility_control_template,
+        )
+        typesupport_fastrtps_outputs = typesupport_fastrtps_generated + [typesupport_fastrtps_visibility_control]
+
     # Stage 4: Compile the generated C code into a library.
 
-    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs + [
+    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs + typesupport_fastrtps_outputs + [
         interface_visibility_control,
         typesupport_introspection_visibility_control,
     ]
@@ -798,13 +838,15 @@ def _c_generator_aspect_impl(target, ctx):
         include_base + "rosidl_typesupport_c",
         include_base + "rosidl_typesupport_introspection_c",
     ]
+    if use_zenoh:
+        include_paths.append(include_base + "rosidl_typesupport_fastrtps_c")
 
     compile_result = _compile_cc_generated_code(
         ctx,
         name = package_name + "_c",
         srcs = _get_srcs(all_outputs),
         hdrs = _get_hdrs(all_outputs),
-        deps = ctx.attr._c_deps + ctx.rule.attr.deps,
+        deps = ctx.attr._c_deps + (ctx.attr._c_fastrtps_deps if use_zenoh else []) + ctx.rule.attr.deps,
         includes = include_paths,
         conlyopts = C_COPTS,
         providers = [CGeneratorInfo],
@@ -861,11 +903,34 @@ c_generator_aspect = aspect(
             default = Label("@ros2_rosidl//:rosidl_typesupport_introspection_c/resource/rosidl_typesupport_introspection_c__visibility_control.h.in"),
             allow_single_file = True,
         ),
+        # Typesupport fastrtps generator (used when --//:rmw=zenoh)
+        "_rmw": attr.label(default = Label("//:rmw")),
+        "_c_typesupport_fastrtps_generator": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c_generator_app"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_c_typesupport_fastrtps_templates": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c_generator_templates"),
+        ),
+        "_c_typesupport_fastrtps_visibility_control_template": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c/resource/rosidl_typesupport_fastrtps_c__visibility_control.h.in"),
+            allow_single_file = True,
+        ),
         "_c_deps": attr.label_list(
             default = [
                 Label("@ros2_rosidl//:rosidl_runtime_c"),
                 Label("@ros2_rosidl//:rosidl_typesupport_introspection_c"),
                 Label("@ros2_rosidl_typesupport//:rosidl_typesupport_c"),
+            ],
+            providers = [CcInfo],
+        ),
+        "_c_fastrtps_deps": attr.label_list(
+            default = [
+                Label("@ros2_rosidl//:rosidl_runtime_cpp"),
+                Label("@ros2_rosidl_typesupport//:rosidl_typesupport_cpp"),
+                Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c"),
+                Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp"),
             ],
             providers = [CcInfo],
         ),
@@ -892,6 +957,7 @@ def _cpp_generator_aspect_impl(target, ctx):
     srcs = target[RosInterfaceInfo].srcs
     adapter_info = target[IdlAdapterInfo]
     type_description_info = target[TypeDescriptionInfo]
+    use_zenoh = ctx.attr._rmw[BuildSettingInfo].value == "zenoh"
 
     # Stage 1: Generate the C++ interfaces.
 
@@ -978,8 +1044,8 @@ def _cpp_generator_aspect_impl(target, ctx):
         ),
         outputs = typesupport_outputs,
         args = [
-            # TODO(mvukov) There are also rosidl_typesupport_connext_cpp and rosidl_typesupport_fastrtps_cpp.
-            "--typesupports=rosidl_typesupport_introspection_cpp",
+            "--typesupports",
+            "rosidl_typesupport_fastrtps_cpp" if use_zenoh else "rosidl_typesupport_introspection_cpp",
         ],
         mnemonic = "RosCppTypeSupport",
         progress_message = "Generating C++ type support for %{label}",
@@ -1028,9 +1094,47 @@ def _cpp_generator_aspect_impl(target, ctx):
         idl_tuples = adapter_info.tuples,
     )
 
+    # Stage 3b: Generate the C++ fastrtps typesupport files (only for rmw_zenoh).
+    typesupport_fastrtps_outputs = []
+    if use_zenoh:
+        typesupport_fastrtps_templates = ctx.attr._cpp_typesupport_fastrtps_templates[DefaultInfo].files.to_list()
+        typesupport_fastrtps_output_dir = "rosidl_typesupport_fastrtps_cpp/{}".format(package_name)
+        typesupport_fastrtps_generated = _map_generator_outputs(
+            ctx,
+            prefix = typesupport_fastrtps_output_dir,
+            inputs = srcs,
+            output_templates = [
+                "{ext}/detail/{stem}__rosidl_typesupport_fastrtps_cpp.hpp",
+                "{ext}/detail/dds_fastrtps/{stem}__type_support.cpp",
+            ],
+            snake_case = True,
+        )
+        _run_generator(
+            ctx,
+            package_name = package_name,
+            tool = ctx.executable._cpp_typesupport_fastrtps_generator,
+            inputs = depset(
+                direct = srcs + typesupport_fastrtps_templates,
+                transitive = [adapter_info.files],
+            ),
+            outputs = typesupport_fastrtps_generated,
+            mnemonic = "RosCppTypeSupportFastrtps",
+            progress_message = "Generating C++ fastrtps type support for %{label}",
+            template_dir = _get_template_dir(typesupport_fastrtps_templates),
+            output_dir = typesupport_fastrtps_output_dir,
+            idl_tuples = adapter_info.tuples,
+        )
+        typesupport_fastrtps_visibility_control = _generate_visibility_control(
+            ctx,
+            prefix = typesupport_fastrtps_output_dir,
+            package_name = package_name,
+            template = ctx.file._cpp_typesupport_fastrtps_visibility_control_template,
+        )
+        typesupport_fastrtps_outputs = typesupport_fastrtps_generated + [typesupport_fastrtps_visibility_control]
+
     # Stage 4: Compile the generated C++ code into a library.
 
-    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs + [
+    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs + typesupport_fastrtps_outputs + [
         interface_visibility_control,
     ]
 
@@ -1040,13 +1144,15 @@ def _cpp_generator_aspect_impl(target, ctx):
         include_base + "rosidl_typesupport_cpp",
         include_base + "rosidl_typesupport_introspection_cpp",
     ]
+    if use_zenoh:
+        include_paths.append(include_base + "rosidl_typesupport_fastrtps_cpp")
 
     compilation_info = _compile_cc_generated_code(
         ctx,
         name = package_name + "_cpp",
         srcs = _get_srcs(all_outputs),
         hdrs = _get_hdrs(all_outputs),
-        deps = ctx.attr._cpp_deps + ctx.rule.attr.deps + [target],
+        deps = ctx.attr._cpp_deps + (ctx.attr._cpp_fastrtps_deps if use_zenoh else []) + ctx.rule.attr.deps + [target],
         includes = include_paths,
         cxxopts = CPP_COPTS,
         providers = [CGeneratorInfo, CppGeneratorInfo],
@@ -1099,6 +1205,20 @@ cpp_generator_aspect = aspect(
         "_cpp_typesupport_introspection_templates": attr.label(
             default = Label("@ros2_rosidl//:rosidl_typesupport_introspection_generator_cpp_templates"),
         ),
+        # Typesupport fastrtps generator (used when --//:rmw=zenoh)
+        "_rmw": attr.label(default = Label("//:rmw")),
+        "_cpp_typesupport_fastrtps_generator": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp_generator_app"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_cpp_typesupport_fastrtps_templates": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp_generator_templates"),
+        ),
+        "_cpp_typesupport_fastrtps_visibility_control_template": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp/resource/rosidl_typesupport_fastrtps_cpp__visibility_control.h.in"),
+            allow_single_file = True,
+        ),
         # Compiler dependencies + runtime support libraries
         "_cpp_deps": attr.label_list(
             default = [
@@ -1106,6 +1226,13 @@ cpp_generator_aspect = aspect(
                 Label("@ros2_rosidl//:rosidl_typesupport_introspection_c"),
                 Label("@ros2_rosidl//:rosidl_typesupport_introspection_cpp"),
                 Label("@ros2_rosidl_typesupport//:rosidl_typesupport_cpp"),
+            ],
+            providers = [CcInfo],
+        ),
+        "_cpp_fastrtps_deps": attr.label_list(
+            default = [
+                Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c"),
+                Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp"),
             ],
             providers = [CcInfo],
         ),
