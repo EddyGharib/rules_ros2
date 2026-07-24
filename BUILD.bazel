@@ -1,4 +1,17 @@
 load("@rules_python//python:pip.bzl", "compile_pip_requirements")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+
+# Selects the rmw (DDS) implementation at build time. Read by the interface
+# generators (fastrtps typesupport for zenoh) and by ros2_rmw_implementation.
+string_flag(
+    name = "rmw",
+    build_setting_default = "cyclonedds",
+    values = [
+        "cyclonedds",
+        "zenoh",
+    ],
+    visibility = ["//visibility:public"],
+)
 
 compile_pip_requirements(
     name = "python_requirements",
