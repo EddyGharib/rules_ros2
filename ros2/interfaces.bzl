@@ -15,6 +15,7 @@
 """
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@com_github_mvukov_rules_ros2//ros2:cc_opts.bzl", "CPP_COPTS", "C_COPTS")
 load("@rules_cc//cc:toolchain_utils.bzl", "find_cpp_toolchain")
 load("@rules_python//python:defs.bzl", "py_library")
@@ -269,6 +270,11 @@ _TYPESUPPORT_INTROSPECION_GENERATOR_C_OUTPUT_MAPPING = [
     "detail/%s__type_support.c",
 ]
 
+_TYPESUPPORT_FASTRTPS_GENERATOR_C_OUTPUT_MAPPING = [
+    "detail/%s__rosidl_typesupport_fastrtps_c.h",
+    "detail/%s__type_support_c.cpp",
+]
+
 def _get_hdrs(files):
     return [
         f
@@ -366,6 +372,7 @@ def _c_generator_aspect_impl(target, ctx):
     package_name = target.label.name
     srcs = target[Ros2InterfaceInfo].info.srcs
     adapter = target[IdlAdapterAspectInfo]
+    use_zenoh = ctx.attr._rmw[BuildSettingInfo].value == "zenoh"
 
     interface_outputs, cc_include_dir = run_generator(
         ctx,
@@ -390,9 +397,8 @@ def _c_generator_aspect_impl(target, ctx):
         _TYPESUPPORT_GENERATOR_C_OUTPUT_MAPPING,
         visibility_control_template = ctx.file._typesupport_introspection_visibility_control_template,
         extra_generator_args = [
-            # TODO(mvukov) There are also rosidl_typesupport_connext_c and
-            # rosidl_typesupport_fastrtps_c.
-            "--typesupports=rosidl_typesupport_introspection_c",
+            "--typesupports",
+            "rosidl_typesupport_fastrtps_c" if use_zenoh else "rosidl_typesupport_introspection_c",
         ],
         mnemonic = "Ros2IdlTypeSupportC",
         progress_message = "Generating C type support for %{label}",
@@ -411,7 +417,22 @@ def _c_generator_aspect_impl(target, ctx):
         progress_message = "Generating C type introspection support for %{label}",
     )
 
-    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs
+    typesupport_fastrtps_outputs = []
+    if use_zenoh:
+        typesupport_fastrtps_outputs, _ = run_generator(
+            ctx,
+            srcs,
+            package_name,
+            adapter,
+            ctx.executable._typesupport_fastrtps_generator,
+            ctx.attr._typesupport_fastrtps_templates,
+            _TYPESUPPORT_FASTRTPS_GENERATOR_C_OUTPUT_MAPPING,
+            visibility_control_template = ctx.file._typesupport_fastrtps_visibility_control_template,
+            mnemonic = "Ros2IdlTypeSupportFastrtpsC",
+            progress_message = "Generating C FastRTPS type support for %{label}",
+        )
+
+    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs + typesupport_fastrtps_outputs
     hdrs = _get_hdrs(all_outputs)
     srcs = _get_srcs(all_outputs)
 
@@ -421,7 +442,7 @@ def _c_generator_aspect_impl(target, ctx):
         aspect_info = CGeneratorAspectInfo,
         srcs = srcs,
         hdrs = hdrs,
-        deps = ctx.attr._c_deps,
+        deps = ctx.attr._c_deps + (ctx.attr._c_fastrtps_deps if use_zenoh else []),
         cc_include_dir = cc_include_dir,
         copts = ctx.attr._c_copts,
     )
@@ -466,6 +487,19 @@ c_generator_aspect = aspect(
             default = Label("@ros2_rosidl//:rosidl_typesupport_introspection_c/resource/rosidl_typesupport_introspection_c__visibility_control.h.in"),
             allow_single_file = True,
         ),
+        "_rmw": attr.label(default = Label("//:rmw")),
+        "_typesupport_fastrtps_generator": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c_generator_app"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_typesupport_fastrtps_templates": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c_generator_templates"),
+        ),
+        "_typesupport_fastrtps_visibility_control_template": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c/resource/rosidl_typesupport_fastrtps_c__visibility_control.h.in"),
+            allow_single_file = True,
+        ),
         "_c_copts": attr.string_list(
             default = C_COPTS,
         ),
@@ -474,6 +508,15 @@ c_generator_aspect = aspect(
                 Label("@ros2_rosidl//:rosidl_runtime_c"),
                 Label("@ros2_rosidl//:rosidl_typesupport_introspection_c"),
                 Label("@ros2_rosidl_typesupport//:rosidl_typesupport_c"),
+            ],
+            providers = [CcInfo],
+        ),
+        "_c_fastrtps_deps": attr.label_list(
+            default = [
+                Label("@ros2_rosidl//:rosidl_runtime_cpp"),
+                Label("@ros2_rosidl_typesupport//:rosidl_typesupport_cpp"),
+                Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c"),
+                Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp"),
             ],
             providers = [CcInfo],
         ),
@@ -529,10 +572,16 @@ _TYPESUPPORT_INTROSPECION_GENERATOR_CPP_OUTPUT_MAPPING = [
     "detail/%s__type_support.cpp",
 ]
 
+_TYPESUPPORT_FASTRTPS_GENERATOR_CPP_OUTPUT_MAPPING = [
+    "detail/%s__rosidl_typesupport_fastrtps_cpp.hpp",
+    "detail/dds_fastrtps/%s__type_support.cpp",
+]
+
 def _cpp_generator_aspect_impl(target, ctx):
     package_name = target.label.name
     srcs = target[Ros2InterfaceInfo].info.srcs
     adapter = target[IdlAdapterAspectInfo]
+    use_zenoh = ctx.attr._rmw[BuildSettingInfo].value == "zenoh"
 
     interface_outputs, cc_include_dir = run_generator(
         ctx,
@@ -555,9 +604,8 @@ def _cpp_generator_aspect_impl(target, ctx):
         ctx.attr._typesupport_templates,
         _TYPESUPPORT_GENERATOR_CPP_OUTPUT_MAPPING,
         extra_generator_args = [
-            # TODO(mvukov) There are also rosidl_typesupport_connext_cpp and
-            # rosidl_typesupport_fastrtps_cpp.
-            "--typesupports=rosidl_typesupport_introspection_cpp",
+            "--typesupports",
+            "rosidl_typesupport_fastrtps_cpp" if use_zenoh else "rosidl_typesupport_introspection_cpp",
         ],
         mnemonic = "Ros2IdlTypeSupportCpp",
         progress_message = "Generating C++ type support for %{label}",
@@ -575,7 +623,22 @@ def _cpp_generator_aspect_impl(target, ctx):
         progress_message = "Generating C++ type introspection support for %{label}",
     )
 
-    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs
+    typesupport_fastrtps_outputs = []
+    if use_zenoh:
+        typesupport_fastrtps_outputs, _ = run_generator(
+            ctx,
+            srcs,
+            package_name,
+            adapter,
+            ctx.executable._typesupport_fastrtps_generator,
+            ctx.attr._typesupport_fastrtps_templates,
+            _TYPESUPPORT_FASTRTPS_GENERATOR_CPP_OUTPUT_MAPPING,
+            visibility_control_template = ctx.file._typesupport_fastrtps_visibility_control_template,
+            mnemonic = "Ros2IdlTypeSupportFastrtpsCpp",
+            progress_message = "Generating C++ FastRTPS type support for %{label}",
+        )
+
+    all_outputs = interface_outputs + typesupport_outputs + typesupport_introspection_outputs + typesupport_fastrtps_outputs
     hdrs = _get_hdrs(all_outputs)
     srcs = _get_srcs(all_outputs)
 
@@ -585,7 +648,7 @@ def _cpp_generator_aspect_impl(target, ctx):
         aspect_info = CppGeneratorAspectInfo,
         srcs = srcs,
         hdrs = hdrs,
-        deps = ctx.attr._cpp_deps,
+        deps = ctx.attr._cpp_deps + (ctx.attr._cpp_fastrtps_deps if use_zenoh else []),
         cc_include_dir = cc_include_dir,
         copts = ctx.attr._cpp_copts,
     )
@@ -625,6 +688,19 @@ cpp_generator_aspect = aspect(
         "_typesupport_introspection_templates": attr.label(
             default = Label("@ros2_rosidl//:rosidl_typesupport_introspection_generator_cpp_templates"),
         ),
+        "_rmw": attr.label(default = Label("//:rmw")),
+        "_typesupport_fastrtps_generator": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp_generator_app"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_typesupport_fastrtps_templates": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp_generator_templates"),
+        ),
+        "_typesupport_fastrtps_visibility_control_template": attr.label(
+            default = Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp/resource/rosidl_typesupport_fastrtps_cpp__visibility_control.h.in"),
+            allow_single_file = True,
+        ),
         "_cpp_copts": attr.string_list(
             default = CPP_COPTS,
         ),
@@ -634,6 +710,13 @@ cpp_generator_aspect = aspect(
                 Label("@ros2_rosidl//:rosidl_typesupport_introspection_c"),
                 Label("@ros2_rosidl//:rosidl_typesupport_introspection_cpp"),
                 Label("@ros2_rosidl_typesupport//:rosidl_typesupport_cpp"),
+            ],
+            providers = [CcInfo],
+        ),
+        "_cpp_fastrtps_deps": attr.label_list(
+            default = [
+                Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_c"),
+                Label("@ros2_rosidl_typesupport_fastrtps//:rosidl_typesupport_fastrtps_cpp"),
             ],
             providers = [CcInfo],
         ),
