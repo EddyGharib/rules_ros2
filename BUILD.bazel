@@ -1,4 +1,15 @@
 load("@rules_python//python:pip.bzl", "compile_pip_requirements")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+
+string_flag(
+    name = "rmw",
+    build_setting_default = "cyclonedds",
+    values = [
+        "cyclonedds",
+        "zenoh",
+    ],
+    visibility = ["//visibility:public"],
+)
 
 compile_pip_requirements(
     name = "python_requirements",
