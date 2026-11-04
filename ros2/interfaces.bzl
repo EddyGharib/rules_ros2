@@ -16,8 +16,9 @@
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
+load("@rules_cc//cc:defs.bzl", "CcInfo", "cc_common")
 load("@rules_cc//cc:toolchain_utils.bzl", "find_cpp_toolchain")
-load("@rules_python//python:defs.bzl", "py_library")
+load("@rules_python//python:defs.bzl", "PyInfo", "py_library")
 load(":cc_opts.bzl", "CPP_COPTS", "C_COPTS")
 
 ### Utility functions ###
