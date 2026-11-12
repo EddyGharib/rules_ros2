@@ -1,17 +1,10 @@
-load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
-load("@rules_cc//cc:defs.bzl", "cc_library")
-load("@rules_python//python:defs.bzl", "py_library")
 load("@rules_python//python:pip.bzl", "compile_pip_requirements")
 
-# Selects the rmw (DDS) implementation at build time. Read by the interface
-# generators (fastrtps typesupport for zenoh) and by ros2_rmw_implementation.
-string_flag(
+# The rmw flag lives in rules_ros2_interfaces; kept here so existing
+# --@com_github_mvukov_rules_ros2//:rmw=... settings keep working.
+alias(
     name = "rmw",
-    build_setting_default = "cyclonedds",
-    values = [
-        "cyclonedds",
-        "zenoh",
-    ],
+    actual = "@rules_ros2_interfaces//:rmw",
     visibility = ["//visibility:public"],
 )
 
@@ -28,14 +21,14 @@ exports_files([
     "requirements_lock.txt",
 ])
 
-py_library(
+alias(
     name = "numpy",
+    actual = "@rules_ros2_interfaces//:numpy",
     visibility = ["//visibility:public"],
-    deps = ["@rules_ros2_pip_deps//numpy"],
 )
 
-cc_library(
+alias(
     name = "numpy_lib",
+    actual = "@rules_ros2_interfaces//:numpy_lib",
     visibility = ["//visibility:public"],
-    deps = ["@rules_ros2_pip_deps//numpy:numpy_lib"],
 )

@@ -1,5 +1,6 @@
-""" Defines commonly used C/C++ options.
-"""
+"""Re-exports @rules_ros2_interfaces//ros2:cc_opts.bzl."""
 
-C_COPTS = ["-std=c11", "-fPIC"]
-CPP_COPTS = ["-std=c++17", "-fPIC"]
+load("@rules_ros2_interfaces//ros2:cc_opts.bzl", _CPP_COPTS = "CPP_COPTS", _C_COPTS = "C_COPTS")
+
+C_COPTS = _C_COPTS
+CPP_COPTS = _CPP_COPTS

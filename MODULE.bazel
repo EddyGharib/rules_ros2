@@ -15,7 +15,7 @@ bazel_dep(name = "nlohmann_json", version = "3.11.3")
 bazel_dep(name = "platforms", version = "0.0.10")
 bazel_dep(name = "pybind11_bazel", version = "2.13.6")
 bazel_dep(name = "re2", version = "2024-07-02")  # this is only here to force graph to resolve to higher res2 version compatible with pybind11_bazel above. Remove once no longer needed.
-bazel_dep(name = "rules_cc", version = "0.2.27")
+bazel_dep(name = "rules_cc", version = "0.2.28")
 bazel_dep(name = "rules_foreign_cc", version = "0.14.0")
 bazel_dep(name = "rules_python", version = "1.2.0")
 
@@ -31,10 +31,7 @@ bazel_dep(name = "zstd", version = "1.5.6")
 
 bazel_dep(name = "googletest", version = "1.15.2", dev_dependency = True)
 
-bazel_dep(name = "ros2_rosidl", version = "4.6.10.iw.jazzy.0")
-bazel_dep(name = "ros2_rosidl_typesupport", version = "3.2.3.iw.jazzy.0")
-bazel_dep(name = "ros2_rosidl_typesupport_fastrtps", version = "3.6.4.iw.jazzy.2")
-bazel_dep(name = "ros2_rosidl_python", version = "0.22.2.iw.jazzy.0")
+bazel_dep(name = "rules_ros2_interfaces", version = "0.1.0")
 bazel_dep(name = "ros2cli", version = "0.32.14-1-g221ce584.iw.jazzy.0")
 # bazel_dep(name = "ros2_ament_cmake_ros", version = "0.10.0.iw.1")
 # bazel_dep(name = "ros2_launch_ros", version = "0.19.7.iw.1")
