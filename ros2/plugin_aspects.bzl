@@ -14,6 +14,7 @@
 """ ROS 2 plugin providers and aspects.
 """
 
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load(
     "@com_github_mvukov_rules_ros2//ros2:interfaces.bzl",
     "CppGeneratorInfo",

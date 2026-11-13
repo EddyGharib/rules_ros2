@@ -15,6 +15,8 @@
 """ ROS 2 Rust IDL handling.
 """
 
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load(
     "@com_github_mvukov_rules_ros2//ros2:interfaces.bzl",

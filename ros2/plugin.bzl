@@ -14,6 +14,7 @@
 """ ROS 2 plugin definitions.
 """
 
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@com_github_mvukov_rules_ros2//ros2:cc_defs.bzl", "ros2_cpp_library")
 load(
     "@com_github_mvukov_rules_ros2//ros2:plugin_aspects.bzl",
