@@ -5,7 +5,6 @@ ros2_cpp_test(
     name = "image_transport_plugins_tests",
     size = "small",
     srcs = ["image_transport_plugins_tests.cc"],
-    set_up_ament = True,
     deps = [
         "@googletest//:gtest_main",
         "@ros2_image_common//:image_transport",

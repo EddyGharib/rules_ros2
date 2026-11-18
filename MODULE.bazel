@@ -68,7 +68,6 @@ pip.whl_mods(
     whl_name = "numpy",
 )
 use_repo(pip, "whl_mods_hub")
-
 pip.parse(
     extra_hub_aliases = {
         "numpy": ["numpy_lib"],
@@ -93,7 +92,6 @@ dev_pip.parse(
     requirements_lock = "//repositories/private:resolver_requirements_lock.txt",
 )
 use_repo(dev_pip, "rules_ros2_resolver_deps")
-
 
 # crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
 # crate.from_cargo(
