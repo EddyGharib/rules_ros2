@@ -22,12 +22,9 @@ import ros2cli.entry_points
 # repo at commit 7f36483ad48c73105b450bb9404a13889e01d442.
 
 
-def add_subparsers(parser,
-                   cli_name,
-                   dest,
-                   command_extensions,
-                   hide_extensions=None,
-                   required=True):
+def add_subparsers(
+    parser, cli_name, dest, command_extensions, hide_extensions=None, required=True
+):
     """
     Create argparse subparser for each extension.
 
@@ -53,26 +50,29 @@ def add_subparsers(parser,
       where each contributes a command with specific arguments
     """
     # add subparser with description of available subparsers
-    description = ''
+    description = ""
     if command_extensions:
         max_length = max(
             len(name)
             for name in command_extensions.keys()
-            if hide_extensions is None or name not in hide_extensions)
+            if hide_extensions is None or name not in hide_extensions
+        )
         for name in sorted(command_extensions.keys()):
             if hide_extensions is not None and name in hide_extensions:
                 continue
             extension = command_extensions[name]
             description += (
-                f'{name.ljust(max_length)}  '
-                f'{ros2cli.entry_points.get_first_line_doc(extension)}\n')
+                f"{name.ljust(max_length)}  "
+                f"{ros2cli.entry_points.get_first_line_doc(extension)}\n"
+            )
     subparser = parser.add_subparsers(
-        title='Commands',
+        title="Commands",
         description=description,
-        metavar=f'Call `{cli_name} <command> -h` for more detailed usage.')
+        metavar=f"Call `{cli_name} <command> -h` for more detailed usage.",
+    )
     # use a name which doesn't collide with any argument
     # but is readable when shown as part of the the usage information
-    subparser.dest = ' ' + dest.lstrip('_')
+    subparser.dest = " " + dest.lstrip("_")
     subparser.required = required
 
     # add extension specific sub-parser with its arguments
@@ -81,10 +81,11 @@ def add_subparsers(parser,
         command_parser = subparser.add_parser(
             name,  # NOTE: Here was a bug, replaced extension.NAME with name.
             description=ros2cli.entry_points.get_first_line_doc(extension),
-            formatter_class=argparse.RawDescriptionHelpFormatter)
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+        )
         command_parser.set_defaults(**{dest: extension})
-        if hasattr(extension, 'add_arguments'):
-            extension.add_arguments(command_parser, f'{cli_name} {name}')
+        if hasattr(extension, "add_arguments"):
+            extension.add_arguments(command_parser, f"{cli_name} {name}")
 
     return subparser
 
@@ -97,21 +98,23 @@ class Ros2CommandExtension(ros2cli.command.CommandExtension):
 
     def add_arguments(self, parser, cli_name):
         # self._subparser = parser
-        parser.add_argument('--include-hidden-topics',
-                            action='store_true',
-                            help='Consider hidden topics as well')
-
+        parser.add_argument(
+            "--include-hidden-topics",
+            action="store_true",
+            help="Consider hidden topics as well",
+        )
+        parser.add_argument(
+            "--include-hidden-services",
+            action="store_true",
+            help="Consider hidden services as well",
+        )
         # add arguments and sub-commands of verbs
-        add_subparsers(parser,
-                       cli_name,
-                       '_verb',
-                       self.extensions,
-                       required=False)
+        add_subparsers(parser, cli_name, "_verb", self.extensions, required=False)
 
     def main(self, *, parser, args):
-        if not hasattr(args, '_verb'):
+        if not hasattr(args, "_verb"):
             parser.print_help()
             return 0
 
-        extension = getattr(args, '_verb')
+        extension = getattr(args, "_verb")
         return extension.main(args=args)
